@@ -1,0 +1,77 @@
+.error-logs {
+  padding: 16px;
+}
+
+.error-log-item {
+  background-color: white;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.error-log-item:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+}
+
+.error-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.error-log-type {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: rgba(255, 59, 48, 0.1);
+  color: #FF3B30;
+}
+
+.error-log-time {
+  font-size: 13px;
+  color: #8E8E93;
+}
+
+.error-log-message {
+  font-size: 14px;
+  color: #000000;
+  margin-bottom: 4px;
+}
+
+.error-log-context {
+  font-size: 13px;
+  color: #8E8E93;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 32px;
+  text-align: center;
+  color: #8E8E93;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+.empty-state-text {
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.empty-state-subtext {
+  font-size: 13px;
+} 

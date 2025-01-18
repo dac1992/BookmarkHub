@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>操作历史</title>
+  <link rel="stylesheet" href="styles/popup.css">
+  <link rel="stylesheet" href="styles/history.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <button id="backBtn" class="icon-button">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M10.707 4.293a1 1 0 00-1.414 0L4.586 9H15a1 1 0 110 2H4.586l4.707 4.707a1 1 0 01-1.414 1.414l-7-7a1 1 0 010-1.414l7-7a1 1 0 011.414 0z"/>
+        </svg>
+      </button>
+      <h1>操作历史</h1>
+      <button id="clearBtn" class="icon-button">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <path d="M8.333 7.5v7.5m3.334-7.5v7.5M5 5h10m-8.333 0V4.167C6.667 3.522 7.189 3 7.833 3h4.334c.644 0 1.166.522 1.166 1.167V5m-8.333 0h8.333M5 5v11.667C5 17.403 5.597 18 6.333 18h7.334c.736 0 1.333-.597 1.333-1.333V5"/>
+        </svg>
+      </button>
+    </header>
+
+    <main class="main">
+      <div class="history-list">
+        <!-- 历史记录列表将通过JavaScript动态渲染 -->
+      </div>
+    </main>
+  </div>
+  <script src="history.js"></script>
+</body>
+</html> 

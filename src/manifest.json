@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Bookmark Sync",
+  "version": "1.0.0",
+  "description": "跨浏览器书签同步工具",
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "identity"
+  ],
+  "background": {
+    "service_worker": "background/index.js"
+  },
+  "action": {
+    "default_popup": "popup/index.html"
+  },
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "popup/history.html",
+        "popup/error-details.html",
+        "popup/styles/history.css",
+        "popup/styles/error-details.css"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+} 

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设置</title>
+  <link rel="stylesheet" href="styles/popup.css">
+  <link rel="stylesheet" href="styles/settings.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <button id="backBtn" class="icon-button">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <!-- 返回图标 SVG 路径 -->
+        </svg>
+      </button>
+      <h1>设置</h1>
+    </header>
+
+    <main class="main">
+      <div class="settings-group">
+        <h2>同步设置</h2>
+        <div class="setting-item">
+          <label for="platform">同步平台</label>
+          <select id="platform" class="setting-input">
+            <option value="gitee">Gitee</option>
+            <option value="github">GitHub</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <label for="token">访问令牌</label>
+          <input type="password" id="token" class="setting-input" placeholder="输入访问令牌">
+        </div>
+        <div class="setting-item">
+          <label for="syncInterval">同步间隔</label>
+          <select id="syncInterval" class="setting-input">
+            <option value="300000">5分钟</option>
+            <option value="600000">10分钟</option>
+            <option value="1800000">30分钟</option>
+            <option value="3600000">1小时</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <h2>仓库设置</h2>
+        <div class="setting-item">
+          <label for="owner">仓库所有者</label>
+          <input type="text" id="owner" class="setting-input" placeholder="输入用户名/组织名">
+        </div>
+        <div class="setting-item">
+          <label for="repo">仓库名称</label>
+          <input type="text" id="repo" class="setting-input" placeholder="输入仓库名">
+        </div>
+        <div class="setting-item">
+          <label for="branch">分支名称</label>
+          <input type="text" id="branch" class="setting-input" placeholder="输入分支名">
+        </div>
+      </div>
+
+      <button id="saveBtn" class="primary-button save-button">
+        保存设置
+      </button>
+    </main>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html> 
