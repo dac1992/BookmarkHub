@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Bookmark Sync",
+  "name": "SyncTags",
   "version": "1.0.0",
   "description": "跨浏览器书签同步工具",
   "permissions": [
@@ -8,11 +8,16 @@
     "storage",
     "identity"
   ],
+  "oauth2": {
+    "client_id": "Ov23lihH4oQ0kowMZTTh",
+    "scopes": ["repo"]
+  },
   "host_permissions": [
-    "<all_urls>"
+    "https://github.com/*",
+    "https://api.github.com/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
   "background": {
     "service_worker": "background/index.js",
@@ -29,12 +34,9 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "debug/index.html",
-        "debug/index.js",
-        "popup/history.html",
-        "popup/error-details.html",
-        "popup/styles/history.css",
-        "popup/styles/error-details.css"
+        "debug/*",
+        "popup/*",
+        "assets/*"
       ],
       "matches": ["<all_urls>"]
     }
