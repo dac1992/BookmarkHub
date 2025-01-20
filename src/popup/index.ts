@@ -1,154 +1,121 @@
 import { BookmarkService } from '../services/BookmarkService';
-import { GitService } from '../services/GitService';
-import { HistoryManager } from '../services/HistoryManager';
-import { theme } from './styles/theme';
-import { SyncStatusService } from '../services/SyncStatusService';
-import { Toast } from '../components/Toast';
+import { ProgressEventType, BookmarkChange } from '../types/bookmark';
+import { Logger } from '../utils/logger';
 import './styles/popup.css';
 
-class PopupManager {
-  private bookmarksList: HTMLElement | null = null;
-  private syncStatusService: SyncStatusService;
+const logger = Logger.getInstance();
+logger.info('Popup页面加载');
 
-  constructor(
-    private bookmarkService: BookmarkService,
-    private gitService: GitService,
-    private historyManager: HistoryManager
-  ) {
-    this.syncStatusService = new SyncStatusService();
+class PopupApp {
+  private bookmarkService: BookmarkService;
+  private statusElement!: HTMLDivElement;
+  private progressElement!: HTMLDivElement;
+  private messageElement!: HTMLDivElement;
+  private testButton!: HTMLButtonElement;
+
+  constructor() {
+    logger.info('初始化PopupApp');
+    this.bookmarkService = BookmarkService.getInstance();
+    this.initializeUI();
+    this.setupEventListeners();
   }
 
-  /**
-   * 初始化弹出窗口
-   */
-  async init(): Promise<void> {
-    this.bookmarksList = document.querySelector('.bookmarks-list');
-    await this.renderBookmarks();
-    this.bindEvents();
-    this.updateSyncStatus();
-  }
+  private initializeUI(): void {
+    // 获取已有的HTML元素
+    this.statusElement = document.querySelector('.status') as HTMLDivElement;
+    this.progressElement = document.querySelector('.progress') as HTMLDivElement;
+    this.messageElement = document.querySelector('.message') as HTMLDivElement;
+    this.testButton = document.querySelector('.test-button') as HTMLButtonElement;
 
-  /**
-   * 渲染书签列表
-   */
-  private async renderBookmarks(): Promise<void> {
-    if (!this.bookmarksList) return;
-
-    const bookmarks = await this.bookmarkService.getAllBookmarks();
-    this.bookmarksList.innerHTML = bookmarks.map(bookmark => `
-      <div class="bookmark-item" data-id="${bookmark.id}">
-        <img class="bookmark-icon" src="${this.getFavicon(bookmark.url)}" alt="">
-        <span class="bookmark-title">${bookmark.title}</span>
-      </div>
-    `).join('');
-  }
-
-  /**
-   * 获取网站图标
-   */
-  private getFavicon(url?: string): string {
-    if (!url) return 'assets/folder-icon.png';
-    return `https://www.google.com/s2/favicons?domain=${new URL(url).hostname}`;
-  }
-
-  /**
-   * 绑定事件处理
-   */
-  private bindEvents(): void {
-    // 同步按钮
-    document.getElementById('syncNowBtn')?.addEventListener('click', () => {
-      this.handleSync();
-    });
-
-    // 历史记录按钮
-    document.getElementById('viewHistoryBtn')?.addEventListener('click', () => {
-      this.showHistory();
-    });
-
-    // 设置按钮
-    document.getElementById('settingsBtn')?.addEventListener('click', () => {
-      this.showSettings();
-    });
-
-    // 历史记录按钮
-    document.getElementById('historyBtn')?.addEventListener('click', () => {
-      window.location.href = 'history.html';
-    });
-  }
-
-  /**
-   * 更新同步状态
-   */
-  private async updateSyncStatus(): Promise<void> {
-    const statusText = document.querySelector('.status-text');
-    const statusIcon = document.querySelector('.status-icon');
-    if (!statusText || !statusIcon) return;
-
-    const status = await this.syncStatusService.getStatus();
-    const lastSyncText = await this.syncStatusService.getLastSyncText();
-
-    statusText.textContent = `上次同步: ${lastSyncText}`;
-    
-    // 更新状态图标
-    statusIcon.className = 'status-icon';
-    switch (status.status) {
-      case 'success':
-        statusIcon.classList.add('success');
-        break;
-      case 'error':
-        statusIcon.classList.add('error');
-        break;
-      case 'syncing':
-        statusIcon.classList.add('syncing');
-        break;
+    if (!this.statusElement || !this.progressElement || !this.messageElement || !this.testButton) {
+      logger.error('无法找到必要的UI元素');
+      return;
     }
 
-    // 如果有错误，显示错误信息
-    if (status.error) {
-      const toast = new Toast();
-      toast.error(status.error);
-    }
+    // 设置初始状态
+    this.updateStatus('准备就绪');
+    this.updateProgress(0);
+    this.updateMessage('-');
+
+    // 添加按钮点击事件
+    this.testButton.addEventListener('click', () => {
+      logger.info('点击测试按钮');
+      this.loadBookmarks();
+    });
   }
 
-  /**
-   * 处理同步操作
-   */
-  private async handleSync(): Promise<void> {
+  private setupEventListeners(): void {
+    // 监听进度事件
+    this.bookmarkService.addProgressListener((notification) => {
+      logger.info('收到进度通知', notification);
+      switch (notification.type) {
+        case 'loading':
+          this.updateStatus('开始加载书签');
+          this.updateProgress(0);
+          break;
+        case 'processing':
+          this.updateStatus('正在加载书签');
+          this.updateProgress(notification.progress || 0);
+          break;
+        case 'complete':
+          this.updateStatus('加载完成');
+          this.updateProgress(100);
+          break;
+        case 'error':
+          this.updateStatus('加载失败');
+          this.updateMessage(notification.error?.toString() || '未知错误');
+          break;
+      }
+    });
+
+    // 监听书签变化
+    chrome.bookmarks.onCreated.addListener((id, bookmark) => {
+      logger.info('书签创建', id, bookmark);
+      this.updateMessage(`新建书签: ${bookmark.title}`);
+    });
+
+    chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
+      logger.info('书签删除', id, removeInfo);
+      this.updateMessage(`删除书签: ${removeInfo.node.title}`);
+    });
+
+    chrome.bookmarks.onChanged.addListener((id, changeInfo) => {
+      logger.info('书签修改', id, changeInfo);
+      this.updateMessage(`修改书签: ${changeInfo.title}`);
+    });
+  }
+
+  private async loadBookmarks(): Promise<void> {
     try {
-      const syncBtn = document.getElementById('syncNowBtn');
-      if (syncBtn instanceof HTMLButtonElement) {
-        syncBtn.disabled = true;
-        syncBtn.textContent = '同步中...';
-      }
-
+      this.testButton.disabled = true;
       const bookmarks = await this.bookmarkService.getAllBookmarks();
-      await this.gitService.uploadBookmarks(bookmarks);
-      
-      this.updateSyncStatus();
+      logger.info('书签加载成功', bookmarks);
+      this.updateMessage(`成功加载 ${bookmarks.length} 个书签`);
     } catch (error) {
-      console.error('同步失败:', error);
-      const toast = new Toast();
-      toast.error('同步失败，请重试');
+      logger.error('书签加载失败:', error);
+      this.updateStatus('加载失败');
+      this.updateMessage(error instanceof Error ? error.message : '未知错误');
     } finally {
-      const syncBtn = document.getElementById('syncNowBtn');
-      if (syncBtn instanceof HTMLButtonElement) {
-        syncBtn.disabled = false;
-        syncBtn.textContent = '立即同步';
-      }
+      this.testButton.disabled = false;
     }
   }
 
-  /**
-   * 显示历史记录
-   */
-  private async showHistory(): Promise<void> {
-    // TODO: 实现历史记录页面
+  private updateStatus(status: string): void {
+    this.statusElement.textContent = `状态: ${status}`;
   }
 
-  /**
-   * 显示设置页面
-   */
-  private showSettings(): void {
-    // TODO: 实现设置页面
+  private updateProgress(progress: number): void {
+    this.progressElement.textContent = `进度: ${progress}%`;
+    this.progressElement.setAttribute('aria-valuenow', progress.toString());
   }
-} 
+
+  private updateMessage(message: string): void {
+    this.messageElement.textContent = `消息: ${message}`;
+  }
+}
+
+// 等待 DOM 加载完成后初始化应用
+document.addEventListener('DOMContentLoaded', () => {
+  logger.info('DOM加载完成');
+  new PopupApp();
+}); 

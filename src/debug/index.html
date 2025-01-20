@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>调试页面</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .log-container {
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-bottom: 10px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-bottom: 1px solid #eee;
+    }
+    .log-entry.info { color: #1a73e8; }
+    .log-entry.error { color: #d93025; }
+    .log-entry.debug { color: #188038; }
+    .controls {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button id="clearLogs">清除日志</button>
+    <button id="testBookmarks">测试书签读取</button>
+    <label>
+      <input type="checkbox" id="autoScroll" checked> 自动滚动
+    </label>
+  </div>
+  <div id="logContainer" class="log-container"></div>
+  <script src="index.js"></script>
+</body>
+</html> 

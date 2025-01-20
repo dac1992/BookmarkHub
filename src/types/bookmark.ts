@@ -1,53 +1,72 @@
-// 书签节点类型定义
+/**
+ * 书签节点接口定义
+ */
 export interface BookmarkNode {
   id: string;
   parentId?: string;
   title: string;
   url?: string;
-  children?: BookmarkNode[];
-  dateAdded?: number;
-  dateModified?: number;
-  index?: number;
-}
-
-// 添加 Chrome API 相关类型
-export interface ChromeBookmarkNode extends chrome.bookmarks.BookmarkTreeNode {
   dateAdded: number;
-  dateGroupModified?: number;
-  children?: ChromeBookmarkNode[];
+  dateModified?: number;
+  index: number;
+  children?: BookmarkNode[];
 }
 
-// 转换函数
-export function convertToBookmarkNode(node: ChromeBookmarkNode): BookmarkNode {
-  const bookmarkNode: BookmarkNode = {
-    id: node.id,
-    title: node.title,
-    index: node.index || 0
-  };
-
-  if (node.parentId) bookmarkNode.parentId = node.parentId;
-  if (node.url) bookmarkNode.url = node.url;
-  if (node.dateAdded) bookmarkNode.dateAdded = node.dateAdded;
-  if (node.dateGroupModified) bookmarkNode.dateModified = node.dateGroupModified;
-  if (node.children) {
-    bookmarkNode.children = node.children.map(convertToBookmarkNode);
-  }
-
-  return bookmarkNode;
+/**
+ * 书签同步状态
+ */
+export enum BookmarkSyncStatus {
+  IDLE = 'idle',
+  SYNCING = 'syncing',
+  SUCCESS = 'success',
+  ERROR = 'error'
 }
 
-// 操作类型定义
-export type BookmarkOperationType = 'create' | 'update' | 'delete' | 'move' | 'error';
+/**
+ * 书签操作类型
+ */
+export enum BookmarkOperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  MOVE = 'move'
+}
 
-export interface BookmarkOperation {
+/**
+ * 书签变更记录
+ */
+export interface BookmarkChange {
   type: BookmarkOperationType;
   timestamp: number;
-  bookmark: BookmarkNode;
-  previousState?: BookmarkNode;
-  error?: string; // 添加错误信息字段
+  node: BookmarkNode;
+  oldNode?: BookmarkNode;
 }
 
-// Git配置类型
+/**
+ * 进度事件类型
+ */
+export enum ProgressEventType {
+  LOADING = 'loading',
+  PROCESSING = 'processing',
+  SAVING = 'saving',
+  COMPLETE = 'complete',
+  ERROR = 'error'
+}
+
+/**
+ * 进度通知接口
+ */
+export interface ProgressNotification {
+  type: ProgressEventType;
+  message: string;
+  progress?: number;
+  total?: number;
+  error?: Error;
+}
+
+/**
+ * Git配置接口
+ */
 export interface GitConfig {
   platform: 'github' | 'gitee';
   token: string;
@@ -56,9 +75,16 @@ export interface GitConfig {
   branch: string;
 }
 
-// 同步状态类型
+/**
+ * 同步状态接口
+ */
 export interface SyncStatus {
   lastSync: number;
   status: 'success' | 'error' | 'syncing';
   error?: string;
-} 
+}
+
+/**
+ * 书签操作记录
+ */
+export type BookmarkOperation = BookmarkChange; 

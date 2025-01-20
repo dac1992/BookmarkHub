@@ -1,0 +1,29 @@
+# Cursor 使用规则
+
+1. 基本规则
+   - 每次回复必须以"收到"开头
+   - 使用中文进行交流
+   - 保持简洁明了的表达
+
+2. 文件命名规则
+   - 检查点文件：`checkpoint-XXX.md`
+   - 错误文档：`error-XXX-name.md`
+   - 功能任务：`XXX-f-feature-name.md`
+   - API文档：按模块分类存放
+
+3. 目录结构规范
+   ```
+   /docs
+     /api         - API文档
+     /manual      - 用户手册
+     /checkpoints - 检查点文档
+     /errors      - 错误文档
+   /issues
+     /mXXX-ModuleName  - 模块任务
+   ```
+
+4. 文档格式要求
+   - 使用Markdown格式
+   - 包含明确的状态标记
+   - 使用统一的模板结构
+   - 保持文档间的相互引用 

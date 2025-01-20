@@ -26,52 +26,37 @@ body {
   height: 100%;
 }
 
-/* 按钮行 */
-.button-row {
+.test-container {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   gap: 12px;
-  flex: 1;
-}
-
-/* 第一行两个按钮 */
-.button-row:first-child .toolbar-button {
-  flex: 1;
-  height: 64px;
-}
-
-/* 第二行三个按钮 */
-.button-row:last-child .toolbar-button {
-  flex: 1;
-  height: 64px;
-}
-
-/* 按钮样式 */
-.toolbar-button {
-  padding: 12px 16px;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
+  padding: 16px;
   border: 1px solid var(--border-color);
   border-radius: 8px;
-  background: var(--background-color);
-  color: var(--text-color);
-  cursor: pointer;
-  transition: all 0.2s;
+  background-color: var(--background-color);
 }
 
-.toolbar-button:hover {
+.status, .progress, .message {
+  font-size: 14px;
+  color: var(--text-color);
+  line-height: 1.4;
+}
+
+.test-button {
+  padding: 8px 16px;
+  font-size: 14px;
+  color: var(--text-color);
+  background-color: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.test-button:hover {
   background-color: var(--hover-color);
 }
 
-.toolbar-button svg {
-  width: 24px;
-  height: 24px;
-}
-
-.toolbar-button span {
-  font-size: 15px;
-  font-weight: 500;
+.test-button:active {
+  background-color: var(--active-color);
 } 

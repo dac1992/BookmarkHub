@@ -12,52 +12,12 @@
 
 # Tasks
 - [ ] GitHub/Gitee API集成
-  - [ ] 实现OAuth认证
-  ```typescript
-  interface GitConfig {
-    platform: 'github' | 'gitee';
-    token: string;
-    owner: string;
-    repo: string;
-    branch: string;
-  }
-
-  class GitService {
-    constructor(private config: GitConfig) {}
-
-    async uploadBookmarks(bookmarks: BookmarkNode[]): Promise<void> {
-      const content = this.encryptData(bookmarks);
-      await this.pushToRepository(content);
-    }
-  }
-  ```
-
+- [ ] 实现OAuth认证
 - [ ] 数据加密存储
-  - [ ] 实现AES加密
-  ```typescript
-  class EncryptionService {
-    private readonly algorithm = 'aes-256-gcm';
-
-    async encrypt(data: any, key: string): Promise<string> {
-      // 实现加密逻辑
-    }
-
-    async decrypt(encryptedData: string, key: string): Promise<any> {
-      // 实现解密逻辑
-    }
-  }
-  ```
-
+- [ ] 实现AES加密
 - [ ] 冲突检测和解决
-  - [ ] 实现版本比较
-  - [ ] 合并策略
-  ```typescript
-  class ConflictResolver {
-    async resolveConflicts(local: BookmarkNode[], remote: BookmarkNode[]): Promise<BookmarkNode[]> {
-      // 实现冲突解决逻辑
-    }
-  }
-  ```
+- [ ] 实现版本比较
+- [ ] 合并策略
 
 # Implementation Plan
 1. 第一阶段：Git平台集成

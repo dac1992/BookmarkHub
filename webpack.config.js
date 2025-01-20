@@ -1,15 +1,15 @@
 const path = require('path');
-const CopyPlugin = require('copy-webpack-plugin');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const CopyWebpackPlugin = require('copy-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 
 module.exports = {
   mode: 'development',
+  devtool: 'source-map',
   entry: {
-    'background/index': './src/background/index.ts',
     'popup/index': './src/popup/index.ts',
-    'popup/history': './src/popup/history.ts',
-    'popup/error-details': './src/popup/error-details.ts'
+    'background/index': './src/background/index.ts',
+    'debug/index': './src/debug/index.ts'
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -20,12 +20,30 @@ module.exports = {
     rules: [
       {
         test: /\.ts$/,
-        use: 'ts-loader',
+        use: [
+          {
+            loader: 'ts-loader',
+            options: {
+              transpileOnly: false,
+              compilerOptions: {
+                sourceMap: true
+              }
+            }
+          }
+        ],
         exclude: /node_modules/
       },
       {
         test: /\.css$/,
-        use: [MiniCssExtractPlugin.loader, 'css-loader']
+        use: [
+          {
+            loader: MiniCssExtractPlugin.loader,
+            options: {
+              publicPath: '../'
+            }
+          },
+          'css-loader'
+        ]
       }
     ]
   },
@@ -33,38 +51,36 @@ module.exports = {
     extensions: ['.ts', '.js']
   },
   plugins: [
-    new CopyPlugin({
-      patterns: [
-        { 
-          from: 'src/manifest.json',
-          to: 'manifest.json'
-        },
-        {
-          from: 'src/assets',
-          to: 'assets',
-          globOptions: {
-            ignore: ['**/*.ts']
-          }
-        }
-      ]
-    }),
     new HtmlWebpackPlugin({
-      template: 'src/popup/index.html',
+      template: './src/popup/index.html',
       filename: 'popup/index.html',
-      chunks: ['popup/index']
+      chunks: ['popup/index'],
+      inject: 'body',
+      scriptLoading: 'defer',
+      minify: false
     }),
     new HtmlWebpackPlugin({
-      template: 'src/popup/history.html',
-      filename: 'popup/history.html',
-      chunks: ['popup/history']
-    }),
-    new HtmlWebpackPlugin({
-      template: 'src/popup/error-details.html',
-      filename: 'popup/error-details.html',
-      chunks: ['popup/error-details']
+      template: './src/debug/index.html',
+      filename: 'debug/index.html',
+      chunks: ['debug/index'],
+      inject: 'body',
+      scriptLoading: 'defer',
+      minify: false
     }),
     new MiniCssExtractPlugin({
       filename: '[name].css'
+    }),
+    new CopyWebpackPlugin({
+      patterns: [
+        { 
+          from: 'src/manifest.json'
+        },
+        { from: 'src/assets', to: 'assets' }
+      ]
     })
-  ]
+  ],
+  optimization: {
+    minimize: false,
+    splitChunks: false
+  }
 }; 

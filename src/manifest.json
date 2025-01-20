@@ -8,8 +8,15 @@
     "storage",
     "identity"
   ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
   "background": {
-    "service_worker": "background/index.js"
+    "service_worker": "background/index.js",
+    "type": "module"
   },
   "action": {
     "default_popup": "popup/index.html"
@@ -22,6 +29,8 @@
   "web_accessible_resources": [
     {
       "resources": [
+        "debug/index.html",
+        "debug/index.js",
         "popup/history.html",
         "popup/error-details.html",
         "popup/styles/history.css",
