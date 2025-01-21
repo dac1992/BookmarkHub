@@ -1,15 +1,9 @@
 /**
  * 书签节点接口定义
  */
-export interface BookmarkNode {
-  id: string;
-  parentId?: string;
-  title: string;
-  url?: string;
+export interface BookmarkNode extends chrome.bookmarks.BookmarkTreeNode {
   dateAdded: number;
-  dateModified?: number;
   index: number;
-  children?: BookmarkNode[];
 }
 
 /**
@@ -35,21 +29,22 @@ export enum BookmarkOperationType {
 /**
  * 书签变更记录
  */
-export interface BookmarkChange {
-  type: BookmarkOperationType;
-  timestamp: number;
-  node: BookmarkNode;
-  oldNode?: BookmarkNode;
-}
+export type BookmarkChange = {
+  type: 'created' | 'removed' | 'changed';
+  id: string;
+  title?: string;
+  url?: string;
+  parentId?: string;
+  index?: number;
+};
 
 /**
  * 进度事件类型
  */
 export enum ProgressEventType {
-  LOADING = 'loading',
-  PROCESSING = 'processing',
-  SAVING = 'saving',
-  COMPLETE = 'complete',
+  START = 'loading',
+  PROGRESS = 'processing',
+  SUCCESS = 'complete',
   ERROR = 'error'
 }
 
@@ -60,8 +55,6 @@ export interface ProgressNotification {
   type: ProgressEventType;
   message: string;
   progress?: number;
-  total?: number;
-  error?: Error;
 }
 
 /**

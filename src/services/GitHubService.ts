@@ -1,9 +1,16 @@
 import { Logger } from '../utils/logger';
+import { ConfigService } from './ConfigService';
+import { RetryHelper } from '../utils/retry';
+import { ProgressNotification, ProgressEventType, BookmarkNode } from '../types/bookmark';
 
 export interface GitHubConfig {
   clientId: string;
   clientSecret: string;
   scopes: string[];
+  gistId?: string;
+  owner?: string;
+  repo?: string;
+  branch?: string;
 }
 
 export interface GitHubToken {
@@ -14,31 +21,14 @@ export interface GitHubToken {
 
 export class GitHubService {
   private static instance: GitHubService;
+  private token: string | null = null;
   private logger: Logger;
-  private config: GitHubConfig;
-  private redirectUrl: string;
+  private configService: ConfigService;
+  private progressListeners: ((notification: ProgressNotification) => void)[] = [];
 
   private constructor() {
     this.logger = Logger.getInstance();
-    
-    // 修改重定向URL格式
-    const extensionId = chrome.runtime.id;
-    this.redirectUrl = `https://${extensionId}.chromiumapp.org/`;
-    
-    this.config = {
-      clientId: 'Ov23lihH4oQ0kowMZTTh',
-      clientSecret: 'b84b6393a76701e46dab93d72e47db2ad8523429',
-      scopes: ['repo']
-    };
-    
-    this.logger.debug('GitHubService初始化:', {
-      extensionId,
-      redirectUrl: this.redirectUrl,
-      config: {
-        ...this.config,
-        clientSecret: '******'
-      }
-    });
+    this.configService = ConfigService.getInstance();
   }
 
   public static getInstance(): GitHubService {
@@ -48,202 +38,323 @@ export class GitHubService {
     return GitHubService.instance;
   }
 
-  public async authenticate(): Promise<GitHubToken> {
-    try {
-      this.logger.info('开始GitHub认证流程');
-      
-      // 清除任何可能存在的旧token
-      await this.clearToken();
-      
-      const authUrl = this.buildAuthUrl();
-      this.logger.debug('认证URL:', authUrl);
-      
-      // 添加重试机制
-      let retryCount = 0;
-      const maxRetries = 3;
-      
-      while (retryCount < maxRetries) {
-        try {
-          const redirectUrl = await this.launchWebAuthFlow(authUrl);
-          this.logger.debug('重定向URL:', redirectUrl);
-          
-          const code = this.extractCode(redirectUrl);
-          this.logger.debug('获取到授权码');
-          
-          const token = await this.exchangeCodeForToken(code);
-          this.logger.debug('成功获取访问令牌');
-          
-          // 验证获取到的token
-          if (await this.validateToken(token)) {
-            await this.saveToken(token);
-            this.logger.info('GitHub认证流程完成');
-            return token;
-          } else {
-            throw new Error('Token验证失败');
-          }
-        } catch (error) {
-          retryCount++;
-          if (retryCount >= maxRetries) {
-            throw error;
-          }
-          this.logger.warn(`认证尝试 ${retryCount} 失败，准备重试...`);
-          await new Promise(resolve => setTimeout(resolve, 1000)); // 等待1秒后重试
-        }
-      }
-      
-      throw new Error('超过最大重试次数');
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error('GitHub认证失败:', errorMessage);
-      throw new Error(`GitHub认证失败: ${errorMessage}`);
+  public addProgressListener(listener: (notification: ProgressNotification) => void): void {
+    this.progressListeners.push(listener);
+  }
+
+  public removeProgressListener(listener: (notification: ProgressNotification) => void): void {
+    const index = this.progressListeners.indexOf(listener);
+    if (index !== -1) {
+      this.progressListeners.splice(index, 1);
     }
   }
 
-  private buildAuthUrl(): string {
-    const state = Math.random().toString(36).substring(7);
-    const params = new URLSearchParams({
-      client_id: this.config.clientId,
-      redirect_uri: this.redirectUrl,
-      scope: this.config.scopes.join(' '),
-      response_type: 'code',
-      state,
-      allow_signup: 'false' // 禁止注册新用户
-    });
-
-    const url = `https://github.com/login/oauth/authorize?${params.toString()}`;
-    this.logger.debug('构建认证URL:', {
-      url,
-      redirectUri: this.redirectUrl,
-      state
-    });
-    return url;
+  private notifyProgress(notification: ProgressNotification): void {
+    this.progressListeners.forEach(listener => listener(notification));
   }
 
-  private async launchWebAuthFlow(authUrl: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      chrome.identity.launchWebAuthFlow(
-        {
-          url: authUrl,
-          interactive: true
-        },
-        (redirectUrl) => {
-          if (chrome.runtime.lastError) {
-            const error = chrome.runtime.lastError;
-            this.logger.error('认证流程错误:', error);
-            
-            if (error.message.includes('User cancelled')) {
-              reject(new Error('用户取消了认证'));
-            } else if (error.message.includes('Authorization page could not be loaded')) {
-              reject(new Error('无法加载授权页面，请检查网络连接'));
-            } else {
-              reject(new Error(`认证流程错误: ${error.message}`));
-            }
-          } else if (!redirectUrl) {
-            this.logger.error('认证失败：未获取到重定向URL');
-            reject(new Error('认证失败：未获取到重定向URL'));
-          } else {
-            this.logger.debug('认证流程完成，重定向URL:', redirectUrl);
-            resolve(redirectUrl);
+  public async authenticate(): Promise<void> {
+    this.notifyProgress({
+      type: ProgressEventType.START,
+      message: '正在验证GitHub认证...'
+    });
+    try {
+      const config = await this.configService.getConfig();
+      if (!config.gitConfig.token) {
+        throw new Error('GitHub Token未设置');
+      }
+      this.token = config.gitConfig.token;
+      
+      // 验证token有效性
+      await RetryHelper.execute(async () => {
+        const response = await fetch('https://api.github.com/user', {
+          headers: {
+            'Authorization': `token ${this.token}`,
           }
+        });
+        
+        if (!response.ok) {
+          throw new Error('GitHub Token无效');
+        }
+      });
+      
+      this.notifyProgress({
+        type: ProgressEventType.SUCCESS,
+        message: 'GitHub认证成功'
+      });
+    } catch (error: any) {
+      this.notifyProgress({
+        type: ProgressEventType.ERROR,
+        message: `GitHub认证失败: ${error.message}`
+      });
+      throw error;
+    }
+  }
+
+  public async uploadBookmarks(bookmarks: BookmarkNode[]): Promise<void> {
+    try {
+      await this.authenticate();
+      const config = await this.configService.getConfig();
+      
+      this.notifyProgress({
+        type: ProgressEventType.START,
+        message: '开始上传书签...'
+      });
+      
+      if (config.syncType === 'gist') {
+        await this.uploadToGist(bookmarks);
+      } else {
+        await this.uploadToRepo(bookmarks);
+      }
+      
+      this.notifyProgress({
+        type: ProgressEventType.SUCCESS,
+        message: '书签上传完成'
+      });
+    } catch (error: any) {
+      this.notifyProgress({
+        type: ProgressEventType.ERROR,
+        message: `上传书签失败: ${error.message}`
+      });
+      this.logger.error('上传书签失败:', error);
+      throw error;
+    }
+  }
+
+  private async uploadToGist(bookmarks: BookmarkNode[]): Promise<void> {
+    const config = await this.configService.getConfig();
+    const content = JSON.stringify(bookmarks, null, 2);
+    
+    await RetryHelper.execute(async () => {
+      if (!config.gitConfig.gistId) {
+        this.notifyProgress({
+          type: ProgressEventType.PROGRESS,
+          message: '创建新的Gist...',
+          progress: 30
+        });
+        // 创建新的Gist
+        const response = await fetch('https://api.github.com/gists', {
+          method: 'POST',
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            description: 'Browser Bookmarks Sync',
+            public: false,
+            files: {
+              'bookmarks.json': {
+                content
+              }
+            }
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('创建Gist失败');
+        }
+
+        const data = await response.json();
+        await this.configService.updateConfig({
+          gitConfig: {
+            ...config.gitConfig,
+            gistId: data.id
+          }
+        });
+      } else {
+        this.notifyProgress({
+          type: ProgressEventType.PROGRESS,
+          message: '更新已有Gist...',
+          progress: 50
+        });
+        // 更新已有的Gist
+        const response = await fetch(`https://api.github.com/gists/${config.gitConfig.gistId}`, {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            files: {
+              'bookmarks.json': {
+                content
+              }
+            }
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error('更新Gist失败');
+        }
+      }
+    });
+  }
+
+  private async uploadToRepo(bookmarks: BookmarkNode[]): Promise<void> {
+    const config = await this.configService.getConfig();
+    const content = JSON.stringify(bookmarks, null, 2);
+    const path = 'bookmarks.json';
+    
+    await RetryHelper.execute(async () => {
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '检查仓库文件状态...',
+        progress: 30
+      });
+      // 获取文件SHA（如果存在）
+      let sha: string | undefined;
+      try {
+        const response = await fetch(
+          `https://api.github.com/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${path}?ref=${config.gitConfig.branch}`,
+          {
+            headers: {
+              'Authorization': `token ${this.token}`,
+            }
+          }
+        );
+        if (response.ok) {
+          const data = await response.json();
+          sha = data.sha;
+        }
+      } catch (error) {
+        // 文件不存在，忽略错误
+      }
+
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '上传文件到仓库...',
+        progress: 60
+      });
+      // 创建或更新文件
+      const response = await fetch(
+        `https://api.github.com/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${path}`,
+        {
+          method: 'PUT',
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            message: '更新书签',
+            content: Buffer.from(content).toString('base64'),
+            branch: config.gitConfig.branch,
+            ...(sha ? { sha } : {})
+          })
         }
       );
+
+      if (!response.ok) {
+        throw new Error('上传到仓库失败');
+      }
     });
   }
 
-  private extractCode(redirectUrl: string): string {
+  public async downloadBookmarks(): Promise<BookmarkNode[]> {
+    this.notifyProgress({
+      type: ProgressEventType.START,
+      message: '开始下载书签...'
+    });
+    
     try {
-      const url = new URL(redirectUrl);
-      const code = url.searchParams.get('code');
-      const state = url.searchParams.get('state');
-      const error = url.searchParams.get('error');
-      const errorDescription = url.searchParams.get('error_description');
-
-      if (error) {
-        throw new Error(`GitHub返回错误: ${error} - ${errorDescription || '未知错误'}`);
+      await this.authenticate();
+      const config = await this.configService.getConfig();
+      
+      let bookmarks: BookmarkNode[];
+      if (config.syncType === 'gist') {
+        bookmarks = await this.downloadFromGist();
+      } else {
+        bookmarks = await this.downloadFromRepo();
       }
-
-      if (!code) {
-        throw new Error('未在重定向URL中找到授权码');
-      }
-
-      return code;
-    } catch (error) {
-      this.logger.error('解析重定向URL失败:', error);
-      throw new Error(`解析重定向URL失败: ${error instanceof Error ? error.message : String(error)}`);
+      
+      this.notifyProgress({
+        type: ProgressEventType.SUCCESS,
+        message: '书签下载完成'
+      });
+      return bookmarks;
+    } catch (error: any) {
+      this.notifyProgress({
+        type: ProgressEventType.ERROR,
+        message: `下载书签失败: ${error.message}`
+      });
+      throw error;
     }
   }
 
-  private async exchangeCodeForToken(code: string): Promise<GitHubToken> {
-    try {
-      const response = await fetch('https://github.com/login/oauth/access_token', {
-        method: 'POST',
+  private async downloadFromGist(): Promise<BookmarkNode[]> {
+    const config = await this.configService.getConfig();
+    if (!config.gitConfig.gistId) {
+      throw new Error('Gist ID未设置');
+    }
+
+    return await RetryHelper.execute(async () => {
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '从Gist下载书签...',
+        progress: 50
+      });
+      
+      const response = await fetch(`https://api.github.com/gists/${config.gitConfig.gistId}`, {
         headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          client_id: this.config.clientId,
-          client_secret: this.config.clientSecret,
-          code: code,
-          redirect_uri: this.redirectUrl
-        })
+          'Authorization': `token ${this.token}`,
+        }
       });
 
-      this.logger.debug('Token请求状态:', response.status);
-      
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`获取访问令牌失败 (${response.status}): ${errorText}`);
+        throw new Error('从Gist下载失败');
       }
 
       const data = await response.json();
-      
-      if (data.error) {
-        throw new Error(`GitHub API错误: ${data.error_description || data.error}`);
-      }
-
-      if (!data.access_token) {
-        throw new Error('GitHub响应中未包含访问令牌');
-      }
-
-      return {
-        accessToken: data.access_token,
-        tokenType: data.token_type || 'bearer',
-        scope: data.scope || this.config.scopes.join(' ')
-      };
-    } catch (error) {
-      this.logger.error('交换令牌失败:', error);
-      throw error;
-    }
+      const content = data.files['bookmarks.json'].content;
+      const bookmarks = JSON.parse(content);
+      return this.normalizeBookmarks(bookmarks);
+    });
   }
 
-  private async validateToken(token: GitHubToken): Promise<boolean> {
-    try {
-      const response = await fetch('https://api.github.com/user', {
-        headers: {
-          'Authorization': `${token.tokenType} ${token.accessToken}`,
-          'Accept': 'application/vnd.github.v3+json'
+  private async downloadFromRepo(): Promise<BookmarkNode[]> {
+    const config = await this.configService.getConfig();
+    const path = 'bookmarks.json';
+
+    return await RetryHelper.execute(async () => {
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '从仓库下载书签...',
+        progress: 50
+      });
+      
+      const response = await fetch(
+        `https://api.github.com/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${path}?ref=${config.gitConfig.branch}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+          }
         }
-      });
-      
-      return response.ok;
-    } catch (error) {
-      this.logger.error('验证token失败:', error);
-      return false;
-    }
+      );
+
+      if (!response.ok) {
+        throw new Error('从仓库下载失败');
+      }
+
+      const data = await response.json();
+      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+      const bookmarks = JSON.parse(content);
+      return this.normalizeBookmarks(bookmarks);
+    });
   }
 
-  private async saveToken(token: GitHubToken): Promise<void> {
-    try {
-      await chrome.storage.local.set({ 
-        github_token: token,
-        token_timestamp: Date.now()
-      });
-      this.logger.info('GitHub令牌已保存');
-    } catch (error) {
-      this.logger.error('保存GitHub令牌失败:', error);
-      throw error;
-    }
+  private normalizeBookmarks(bookmarks: any[]): BookmarkNode[] {
+    const normalize = (node: any, index: number): BookmarkNode => {
+      return {
+        id: node.id || String(Date.now() + index),
+        title: node.title || '',
+        url: node.url,
+        parentId: node.parentId,
+        dateAdded: node.dateAdded || Date.now(),
+        index: node.index || index,
+        children: node.children?.map((child: any, idx: number) => normalize(child, idx))
+      };
+    };
+    
+    return bookmarks.map((node, index) => normalize(node, index));
   }
 
   public async getToken(): Promise<GitHubToken | null> {

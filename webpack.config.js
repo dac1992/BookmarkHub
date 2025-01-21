@@ -8,6 +8,7 @@ module.exports = {
   devtool: 'source-map',
   entry: {
     'popup/index': './src/popup/index.ts',
+    'settings/index': './src/popup/settings.ts',
     'background/index': './src/background/index.ts',
     'debug/index': './src/debug/index.ts'
   },
@@ -60,6 +61,14 @@ module.exports = {
       minify: false
     }),
     new HtmlWebpackPlugin({
+      template: './src/popup/settings.html',
+      filename: 'settings/index.html',
+      chunks: ['settings/index'],
+      inject: 'body',
+      scriptLoading: 'defer',
+      minify: false
+    }),
+    new HtmlWebpackPlugin({
       template: './src/debug/index.html',
       filename: 'debug/index.html',
       chunks: ['debug/index'],
@@ -72,9 +81,7 @@ module.exports = {
     }),
     new CopyWebpackPlugin({
       patterns: [
-        { 
-          from: 'src/manifest.json'
-        },
+        { from: 'src/manifest.json' },
         { from: 'src/assets', to: 'assets' }
       ]
     })

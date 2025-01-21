@@ -10,7 +10,7 @@
   ],
   "oauth2": {
     "client_id": "Ov23lihH4oQ0kowMZTTh",
-    "scopes": ["repo"]
+    "scopes": ["repo", "gist"]
   },
   "host_permissions": [
     "https://github.com/*",
@@ -26,6 +26,10 @@
   "action": {
     "default_popup": "popup/index.html"
   },
+  "options_ui": {
+    "page": "settings/index.html",
+    "open_in_tab": false
+  },
   "icons": {
     "16": "assets/icon16.png",
     "48": "assets/icon48.png",
@@ -36,6 +40,7 @@
       "resources": [
         "debug/*",
         "popup/*",
+        "settings/*",
         "assets/*"
       ],
       "matches": ["<all_urls>"]

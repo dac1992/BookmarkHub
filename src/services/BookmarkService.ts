@@ -1,4 +1,4 @@
-import { BookmarkNode, BookmarkChange, BookmarkOperationType, ProgressNotification, ProgressEventType } from '../types/bookmark';
+import { BookmarkNode, BookmarkChange, ProgressNotification, ProgressEventType } from '../types/bookmark';
 import { Logger } from '../utils/logger';
 
 const logger = Logger.getInstance();
@@ -16,15 +16,14 @@ export class BookmarkService {
   private readonly CACHE_KEY = 'bookmark_cache';
   private readonly CACHE_VERSION = '1.0.0';
   private readonly CACHE_EXPIRY = 24 * 60 * 60 * 1000; // 24小时
+  private logger: Logger;
 
   private constructor() {
-    logger.debug('BookmarkService: 构造函数开始');
+    this.logger = Logger.getInstance();
     this.initializeEventListeners();
-    logger.debug('BookmarkService: 构造函数完成');
   }
 
   public static getInstance(): BookmarkService {
-    logger.debug('BookmarkService: 获取实例');
     if (!BookmarkService.instance) {
       BookmarkService.instance = new BookmarkService();
     }
@@ -32,46 +31,39 @@ export class BookmarkService {
   }
 
   private initializeEventListeners(): void {
-    logger.debug('BookmarkService: 初始化事件监听器');
     // 监听创建事件
     chrome.bookmarks.onCreated.addListener((id, bookmark) => {
-      logger.debug('BookmarkService: 书签创建', id, bookmark);
-      const node = this.normalizeNode(bookmark);
-      this.notifyChange({
-        type: BookmarkOperationType.CREATE,
-        timestamp: Date.now(),
-        node
-      });
+      const change: BookmarkChange = {
+        type: 'created',
+        id,
+        title: bookmark.title,
+        url: bookmark.url,
+        parentId: bookmark.parentId,
+        index: bookmark.index
+      };
+      this.notifyChange(change);
     });
 
     // 监听更新事件
-    chrome.bookmarks.onChanged.addListener(async (id, changeInfo) => {
-      logger.debug('BookmarkService: 书签更新', id, changeInfo);
-      const [bookmark] = await chrome.bookmarks.get(id);
-      const node = this.normalizeNode(bookmark);
-      this.notifyChange({
-        type: BookmarkOperationType.UPDATE,
-        timestamp: Date.now(),
-        node
-      });
+    chrome.bookmarks.onChanged.addListener((id, changeInfo) => {
+      const change: BookmarkChange = {
+        type: 'changed',
+        id,
+        title: changeInfo.title,
+        url: changeInfo.url
+      };
+      this.notifyChange(change);
     });
 
     // 监听删除事件
     chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
-      logger.debug('BookmarkService: 书签删除', id, removeInfo);
-      const node: BookmarkNode = {
+      const change: BookmarkChange = {
+        type: 'removed',
         id,
         parentId: removeInfo.parentId,
-        title: removeInfo.node.title,
-        url: removeInfo.node.url,
-        dateAdded: removeInfo.node.dateAdded || Date.now(),
-        index: removeInfo.node.index || 0
+        index: removeInfo.index
       };
-      this.notifyChange({
-        type: BookmarkOperationType.DELETE,
-        timestamp: Date.now(),
-        node
-      });
+      this.notifyChange(change);
     });
 
     // 监听移动事件
@@ -84,110 +76,129 @@ export class BookmarkService {
         parentId: moveInfo.oldParentId,
         index: moveInfo.oldIndex
       };
-      this.notifyChange({
-        type: BookmarkOperationType.MOVE,
-        timestamp: Date.now(),
-        node,
-        oldNode
-      });
+      this.notifyChange(this.handleBookmarkMoved(id, moveInfo));
     });
   }
 
   public addChangeListener(listener: (change: BookmarkChange) => void): void {
-    logger.debug('BookmarkService: 添加变更监听器');
     this.changeListeners.push(listener);
   }
 
   public removeChangeListener(listener: (change: BookmarkChange) => void): void {
-    logger.debug('BookmarkService: 移除变更监听器');
     const index = this.changeListeners.indexOf(listener);
-    if (index > -1) {
+    if (index !== -1) {
       this.changeListeners.splice(index, 1);
     }
   }
 
-  private async notifyChange(change: BookmarkChange): Promise<void> {
-    logger.debug('BookmarkService: 通知变更', change);
-    this.changeListeners.forEach(listener => {
-      try {
-        listener(change);
-      } catch (error) {
-        logger.error('BookmarkService: 书签变更监听器执行失败:', error);
-      }
-    });
-
-    // 更新缓存
-    await this.updateCache(change);
+  private notifyChange(change: BookmarkChange): void {
+    this.changeListeners.forEach(listener => listener(change));
   }
 
   public addProgressListener(listener: (notification: ProgressNotification) => void): void {
-    logger.debug('BookmarkService: 添加进度监听器');
     this.progressListeners.push(listener);
   }
 
   public removeProgressListener(listener: (notification: ProgressNotification) => void): void {
-    logger.debug('BookmarkService: 移除进度监听器');
     const index = this.progressListeners.indexOf(listener);
-    if (index > -1) {
+    if (index !== -1) {
       this.progressListeners.splice(index, 1);
     }
   }
 
   private notifyProgress(notification: ProgressNotification): void {
-    logger.debug('BookmarkService: 通知进度', notification);
-    this.progressListeners.forEach(listener => {
-      try {
-        listener(notification);
-      } catch (error) {
-        logger.error('BookmarkService: 进度监听器执行失败:', error);
-      }
-    });
+    this.progressListeners.forEach(listener => listener(notification));
   }
 
   public async getAllBookmarks(): Promise<BookmarkNode[]> {
-    logger.debug('BookmarkService: 开始获取所有书签');
+    const treeNodes = await chrome.bookmarks.getTree();
+    return this.convertToBookmarkNodes(treeNodes);
+  }
+
+  private convertToBookmarkNodes(treeNodes: chrome.bookmarks.BookmarkTreeNode[]): BookmarkNode[] {
+    const convert = (node: chrome.bookmarks.BookmarkTreeNode, index: number): BookmarkNode => {
+      return {
+        ...node,
+        dateAdded: node.dateAdded || Date.now(),
+        index,
+        children: node.children?.map((child, idx) => convert(child, idx))
+      };
+    };
+    
+    return treeNodes.map((node, index) => convert(node, index));
+  }
+
+  public async updateAllBookmarks(bookmarks: BookmarkNode[]): Promise<void> {
+    this.notifyProgress({
+      type: ProgressEventType.START,
+      message: '开始更新本地书签...'
+    });
+
     try {
-      this.notifyProgress({
-        type: ProgressEventType.LOADING,
-        message: '正在加载书签数据...'
-      });
+      // 获取根节点
+      const [root] = await chrome.bookmarks.getTree();
+      
+      // 删除所有现有书签
+      for (const child of root.children || []) {
+        if (child.id !== '0') {  // 保留根节点
+          await chrome.bookmarks.removeTree(child.id);
+        }
+      }
 
-      // 从Chrome API获取
-      logger.debug('BookmarkService: 从浏览器获取书签');
-      const bookmarks = await this.fetchBookmarksFromChrome();
-      logger.debug('BookmarkService: 获取到书签数据', bookmarks);
+      // 递归创建新书签
+      const createBookmarkTree = async (
+        node: BookmarkNode,
+        parentId: string
+      ): Promise<void> => {
+        if (node.url) {
+          // 创建书签
+          await chrome.bookmarks.create({
+            parentId,
+            title: node.title,
+            url: node.url
+          });
+        } else {
+          // 创建文件夹
+          const folder = await chrome.bookmarks.create({
+            parentId,
+            title: node.title
+          });
+          
+          // 递归创建子节点
+          if (node.children) {
+            for (const child of node.children) {
+              await createBookmarkTree(child, folder.id);
+            }
+          }
+        }
+      };
+
+      // 开始创建新书签
+      for (const bookmark of bookmarks) {
+        await createBookmarkTree(bookmark, '0');
+      }
 
       this.notifyProgress({
-        type: ProgressEventType.COMPLETE,
-        message: '书签数据加载完成'
+        type: ProgressEventType.SUCCESS,
+        message: '本地书签更新完成'
       });
-      return bookmarks;
-    } catch (error) {
-      logger.error('BookmarkService: 获取书签失败:', error);
+    } catch (error: any) {
       this.notifyProgress({
         type: ProgressEventType.ERROR,
-        message: '加载书签失败',
-        error: error instanceof Error ? error : new Error(String(error))
+        message: `更新本地书签失败: ${error.message}`
       });
       throw error;
     }
   }
 
-  private async fetchBookmarksFromChrome(): Promise<BookmarkNode[]> {
-    logger.debug('BookmarkService: 从Chrome API获取书签');
-    return new Promise((resolve, reject) => {
-      chrome.bookmarks.getTree((results) => {
-        if (chrome.runtime.lastError) {
-          logger.error('BookmarkService: Chrome API错误:', chrome.runtime.lastError);
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          logger.debug('BookmarkService: Chrome API返回结果', results);
-          const bookmarks = this.normalizeBookmarks(results);
-          logger.debug('BookmarkService: 标准化后的书签数据', bookmarks);
-          resolve(bookmarks);
-        }
-      });
-    });
+  public async fetchBookmarksFromChrome(): Promise<BookmarkNode[]> {
+    try {
+      const bookmarks = await chrome.bookmarks.getTree();
+      return this.normalizeBookmarks(bookmarks);
+    } catch (error) {
+      this.logger.error('获取书签失败:', error);
+      throw error;
+    }
   }
 
   private normalizeNode(node: chrome.bookmarks.BookmarkTreeNode): BookmarkNode {
@@ -203,13 +214,39 @@ export class BookmarkService {
 
   private normalizeBookmarks(nodes: chrome.bookmarks.BookmarkTreeNode[]): BookmarkNode[] {
     const result: BookmarkNode[] = [];
-    const processNode = (node: chrome.bookmarks.BookmarkTreeNode) => {
-      result.push(this.normalizeNode(node));
-      if (node.children) {
-        node.children.forEach(processNode);
+    
+    const processNode = (node: chrome.bookmarks.BookmarkTreeNode): BookmarkNode | undefined => {
+      // 跳过根节点
+      if (node.id === '0') {
+        if (node.children) {
+          node.children.forEach(child => processNode(child));
+        }
+        return;
       }
+
+      // 创建新的节点对象
+      const normalizedNode: BookmarkNode = {
+        id: node.id,
+        title: node.title,
+        parentId: node.parentId || '',
+        index: node.index || 0,
+        dateAdded: node.dateAdded || Date.now(),
+        url: node.url,
+        children: []
+      };
+
+      // 处理子节点
+      if (node.children) {
+        normalizedNode.children = node.children
+          .map(child => processNode(child))
+          .filter((child): child is BookmarkNode => child !== undefined);
+      }
+
+      result.push(normalizedNode);
+      return normalizedNode;
     };
-    nodes.forEach(processNode);
+
+    nodes.forEach(node => processNode(node));
     return result;
   }
 
@@ -248,6 +285,46 @@ export class BookmarkService {
       logger.error('BookmarkService: 清除缓存失败:', error);
       throw error;
     }
+  }
+
+  private handleBookmarkCreated(id: string, bookmark: chrome.bookmarks.BookmarkTreeNode): BookmarkChange {
+    return {
+      type: 'created',
+      id,
+      title: bookmark.title,
+      url: bookmark.url,
+      parentId: bookmark.parentId,
+      index: bookmark.index
+    };
+  }
+
+  private handleBookmarkChanged(id: string, changeInfo: chrome.bookmarks.BookmarkChangeInfo): BookmarkChange {
+    return {
+      type: 'changed',
+      id,
+      title: changeInfo.title,
+      url: changeInfo.url
+    };
+  }
+
+  private handleBookmarkRemoved(id: string, removeInfo: chrome.bookmarks.BookmarkRemoveInfo): BookmarkChange {
+    return {
+      type: 'removed',
+      id,
+      parentId: removeInfo.parentId,
+      index: removeInfo.index,
+      title: removeInfo.node.title,
+      url: removeInfo.node.url
+    };
+  }
+
+  private handleBookmarkMoved(id: string, moveInfo: chrome.bookmarks.BookmarkMoveInfo): BookmarkChange {
+    return {
+      type: 'changed',
+      id,
+      parentId: moveInfo.parentId,
+      index: moveInfo.index
+    };
   }
 }
 

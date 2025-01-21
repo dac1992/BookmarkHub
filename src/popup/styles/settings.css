@@ -1,20 +1,68 @@
-.settings-group {
-  background-color: white;
-  border-radius: 12px;
+:root {
+  --primary-color: #007AFF;
+  --secondary-color: #5856D6;
+  --success-color: #34C759;
+  --error-color: #FF3B30;
+  --warning-color: #FF9500;
+  --info-color: #5856D6;
+  --background-color: #F2F2F7;
+  --surface-color: #FFFFFF;
+  --text-primary: #000000;
+  --text-secondary: #8E8E93;
+  --border-color: #C6C6C8;
+  --input-background: #FFFFFF;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  background-color: var(--background-color);
+  color: var(--text-primary);
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 30px;
   padding: 16px;
-  margin: 16px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  background-color: var(--surface-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.main {
+  padding: 0 16px;
+}
+
+.settings-group {
+  background-color: var(--surface-color);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .settings-group h2 {
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 600;
-  color: #8E8E93;
-  margin-bottom: 16px;
+  margin: 0 0 20px 0;
+  color: var(--text-primary);
 }
 
 .setting-item {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .setting-item:last-child {
@@ -23,36 +71,143 @@
 
 .setting-item label {
   display: block;
-  font-size: 13px;
-  color: #000000;
+  font-size: 14px;
+  font-weight: 500;
   margin-bottom: 8px;
+  color: var(--text-primary);
 }
 
 .setting-input {
   width: 100%;
-  padding: 8px 12px;
-  border: 1px solid #C6C6C8;
-  border-radius: 6px;
-  font-size: 15px;
-  color: #000000;
-  background-color: #FFFFFF;
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 16px;
+  background-color: var(--input-background);
+  color: var(--text-primary);
   transition: border-color 0.2s;
 }
 
 .setting-input:focus {
-  border-color: #007AFF;
   outline: none;
+  border-color: var(--primary-color);
 }
 
-select.setting-input {
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%238E8E93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  padding-right: 32px;
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
 }
 
-.save-button {
-  margin: 16px;
-  width: calc(100% - 32px);
+.checkbox-label input[type="checkbox"] {
+  margin-right: 10px;
+  width: 20px;
+  height: 20px;
+}
+
+.checkbox-label span {
+  font-size: 16px;
+}
+
+.setting-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-color);
+}
+
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.primary-button,
+.secondary-button {
+  flex: 1;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.primary-button {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.primary-button:hover {
+  background-color: #0066CC;
+}
+
+.primary-button:active {
+  transform: scale(0.98);
+}
+
+.secondary-button {
+  background-color: var(--surface-color);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+}
+
+.secondary-button:hover {
+  background-color: rgba(0, 122, 255, 0.1);
+}
+
+.secondary-button:active {
+  transform: scale(0.98);
+}
+
+.feedback-container {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-message {
+  margin-top: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: all 0.3s ease;
+}
+
+.status-message.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.status-message.success {
+  background-color: rgba(52, 199, 89, 0.1);
+  color: var(--success-color);
+  border: 1px solid var(--success-color);
+}
+
+.status-message.error {
+  background-color: rgba(255, 59, 48, 0.1);
+  color: var(--error-color);
+  border: 1px solid var(--error-color);
+}
+
+.status-message.info {
+  background-color: rgba(0, 122, 255, 0.1);
+  color: var(--primary-color);
+  border: 1px solid var(--primary-color);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background-color: #000000;
+    --surface-color: #1C1C1E;
+    --text-primary: #FFFFFF;
+    --text-secondary: #98989D;
+    --border-color: #38383A;
+    --input-background: #2C2C2E;
+  }
 } 

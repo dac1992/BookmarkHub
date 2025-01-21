@@ -3,17 +3,118 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>书签同步测试</title>
-  <link rel="stylesheet" href="index.css">
+  <title>书签同步</title>
+  <link rel="stylesheet" href="styles/popup.css">
 </head>
 <body>
   <div class="container">
-    <div class="test-container" role="region" aria-label="书签同步状态">
-      <div id="status" class="status" role="status">状态: 准备就绪</div>
-      <div id="progress" class="progress" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">进度: 0%</div>
-      <div id="message" class="message" role="alert">消息: -</div>
-      <button class="test-button" aria-describedby="status message">测试书签读取</button>
-    </div>
+    <header class="header">
+      <h1>书签同步</h1>
+    </header>
+
+    <main class="main">
+      <!-- 同步状态部分 -->
+      <div class="status-section">
+        <div class="status-item">
+          <span class="status-label">上次同步</span>
+          <span id="lastSync" class="status-value">从未同步</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">书签数量</span>
+          <span id="bookmarkCount" class="status-value">0</span>
+        </div>
+      </div>
+
+      <!-- 同步按钮和进度 -->
+      <div class="sync-section">
+        <button id="syncButton" class="primary-button">
+          <span class="button-text">同步书签</span>
+          <span class="button-icon">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 3a5 5 0 00-5 5v.5a.5.5 0 01-1 0V8a6 6 0 1112 0v.5a.5.5 0 01-1 0V8a5 5 0 00-5-5z"/>
+              <path d="M8 1a7 7 0 00-7 7v.5a.5.5 0 001 0V8a6 6 0 1112 0v.5a.5.5 0 001 0V8a7 7 0 00-7-7z"/>
+            </svg>
+          </span>
+        </button>
+
+        <div class="sync-progress-container">
+          <div class="progress-status">
+            <span id="syncStatus" class="status-text">准备同步...</span>
+            <span id="syncPercentage" class="percentage-text">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 设置部分 -->
+      <div class="settings-section">
+        <div class="settings-group">
+          <h2>GitHub 配置</h2>
+          <div class="setting-item">
+            <label for="syncType">同步类型</label>
+            <select id="syncType" name="syncType" class="setting-input">
+              <option value="repository">Repository</option>
+              <option value="gist">Gist</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="token">GitHub Token</label>
+            <input type="password" id="token" name="token" class="setting-input" placeholder="输入 GitHub Personal Access Token">
+          </div>
+
+          <div id="repositorySettings" class="setting-section">
+            <div class="setting-item">
+              <label for="owner">仓库所有者</label>
+              <input type="text" id="owner" name="owner" class="setting-input" placeholder="输入用户名或组织名">
+            </div>
+            <div class="setting-item">
+              <label for="repo">仓库名称</label>
+              <input type="text" id="repo" name="repo" class="setting-input" placeholder="输入仓库名">
+            </div>
+            <div class="setting-item">
+              <label for="branch">分支名称</label>
+              <input type="text" id="branch" name="branch" class="setting-input" placeholder="输入分支名" value="main">
+            </div>
+          </div>
+
+          <div id="gistSettings" class="setting-section" style="display: none;">
+            <div class="setting-item">
+              <label for="gistId">Gist ID</label>
+              <input type="text" id="gistId" name="gistId" class="setting-input" placeholder="留空将自动创建" readonly>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-group">
+          <h2>同步设置</h2>
+          <div class="setting-item">
+            <label class="checkbox-label">
+              <input type="checkbox" id="autoSync" name="autoSync">
+              <span>启用自动同步</span>
+            </label>
+          </div>
+          <div class="setting-item">
+            <label for="syncInterval">同步间隔</label>
+            <select id="syncInterval" name="syncInterval" class="setting-input">
+              <option value="300000">5分钟</option>
+              <option value="600000">10分钟</option>
+              <option value="1800000">30分钟</option>
+              <option value="3600000">1小时</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="button-group">
+          <button type="button" id="testConnection" class="secondary-button">测试连接</button>
+          <button type="button" id="saveSettings" class="primary-button">保存设置</button>
+        </div>
+      </div>
+
+      <div id="messageContainer" class="message-container"></div>
+    </main>
   </div>
   <script src="index.js"></script>
 </body>

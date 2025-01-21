@@ -1,5 +1,6 @@
 import { BookmarkService } from '../services/BookmarkService';
 import { GitHubService } from '../services/GitHubService';
+import { Logger } from '../utils/logger';
 
 class DebugPage {
   private static instance: DebugPage | null = null;
@@ -11,6 +12,7 @@ class DebugPage {
   private clearGitHubTokenButton: HTMLButtonElement;
   private bookmarkService: BookmarkService;
   private githubService: GitHubService;
+  private logger: Logger;
   private static initialized: boolean = false;
   private static consoleOverridden: boolean = false;
 
@@ -24,6 +26,7 @@ class DebugPage {
     
     this.bookmarkService = BookmarkService.getInstance();
     this.githubService = GitHubService.getInstance();
+    this.logger = Logger.getInstance();
 
     if (!DebugPage.initialized) {
       this.initializeEventListeners();
@@ -65,7 +68,7 @@ class DebugPage {
     this.testButton.addEventListener('click', async () => {
       this.log('info', '开始测试书签读取');
       try {
-        const bookmarks = await this.bookmarkService.getAllBookmarks();
+        const bookmarks = await this.bookmarkService.fetchBookmarksFromChrome();
         this.log('info', `成功读取 ${bookmarks.length} 个书签`);
         this.log('debug', '书签数据:', bookmarks);
       } catch (error) {
@@ -76,13 +79,8 @@ class DebugPage {
     this.testGitHubAuthButton.addEventListener('click', async () => {
       this.log('info', '开始测试GitHub认证');
       try {
-        const token = await this.githubService.authenticate();
+        await this.githubService.authenticate();
         this.log('info', 'GitHub认证成功');
-        this.log('debug', 'Token信息:', {
-          tokenType: token.tokenType,
-          scope: token.scope,
-          accessToken: '******' // 不显示实际token
-        });
       } catch (error) {
         this.log('error', 'GitHub认证失败:', error);
       }
@@ -150,21 +148,15 @@ class DebugPage {
     console.debug = (...args: any[]) => logOnce('debug', ...args);
   }
 
-  private log(level: 'info' | 'error' | 'debug', ...args: any[]): void {
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${level}`;
-    
-    const time = new Date().toISOString();
-    const message = args.map(arg => 
-      typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-    ).join(' ');
-
-    entry.textContent = `[${time}] ${message}`;
-    this.logContainer.appendChild(entry);
-
-    if (this.autoScrollCheckbox.checked) {
-      this.logContainer.scrollTop = this.logContainer.scrollHeight;
+  private log(...args: any[]): void {
+    const output = document.getElementById('output');
+    if (output) {
+      const message = args.map(arg => 
+        typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
+      ).join(' ');
+      output.textContent = `${new Date().toISOString()} ${message}\n${output.textContent}`;
     }
+    this.logger.debug(args.join(' '));
   }
 }
 
