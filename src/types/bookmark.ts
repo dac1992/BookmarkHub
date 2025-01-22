@@ -1,9 +1,14 @@
 /**
  * 书签节点接口定义
  */
-export interface BookmarkNode extends chrome.bookmarks.BookmarkTreeNode {
+export interface BookmarkNode {
+  id: string;
+  title: string;
+  url?: string;
+  parentId?: string;
   dateAdded: number;
   index: number;
+  children?: BookmarkNode[];
 }
 
 /**
@@ -29,22 +34,21 @@ export enum BookmarkOperationType {
 /**
  * 书签变更记录
  */
-export type BookmarkChange = {
-  type: 'created' | 'removed' | 'changed';
+export interface BookmarkChange {
+  type: 'create' | 'remove' | 'move' | 'update';
   id: string;
-  title?: string;
-  url?: string;
-  parentId?: string;
-  index?: number;
-};
+  bookmark: chrome.bookmarks.BookmarkTreeNode;
+  oldParentId?: string;
+  oldIndex?: number;
+}
 
 /**
  * 进度事件类型
  */
 export enum ProgressEventType {
-  START = 'loading',
-  PROGRESS = 'processing',
-  SUCCESS = 'complete',
+  START = 'start',
+  PROGRESS = 'progress',
+  SUCCESS = 'success',
   ERROR = 'error'
 }
 
@@ -66,6 +70,7 @@ export interface GitConfig {
   owner: string;
   repo: string;
   branch: string;
+  gistId?: string;
 }
 
 /**
@@ -75,6 +80,40 @@ export interface SyncStatus {
   lastSync: number;
   status: 'success' | 'error' | 'syncing';
   error?: string;
+}
+
+/**
+ * 书签同步数据
+ */
+export interface BookmarkSyncData {
+  version: string;
+  lastModified: number;
+  deviceId: string;
+  bookmarks: BookmarkNode[];
+  metadata: {
+    totalCount: number;
+    folderCount: number;
+    lastSync: number;
+    syncVersion: string;
+  };
+}
+
+/**
+ * 书签同步配置
+ */
+export interface SyncConfig {
+  syncType: 'gist' | 'repo';
+  syncInterval: number;
+  autoSync: boolean;
+  deviceId: string;
+  lastSyncTime?: number;
+  gitConfig: {
+    token: string;
+    gistId?: string;
+    owner?: string;
+    repo?: string;
+    branch?: string;
+  };
 }
 
 /**

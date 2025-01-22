@@ -1,78 +1,83 @@
 import { BookmarkService } from '../services/BookmarkService';
 import { ConfigService } from '../services/ConfigService';
 import { GitHubService } from '../services/GitHubService';
+import { SyncService } from '../services/SyncService';
 import { Toast } from '../components/Toast';
 import { Logger } from '../utils/logger';
+import { SyncConfig } from '../types/bookmark';
 import './styles/popup.css';
 
 const logger = Logger.getInstance();
 logger.info('Popup页面加载');
 
+interface Elements {
+  syncPanel: HTMLElement | null;
+  settingsPanel: HTMLElement | null;
+  settingsButton: HTMLElement | null;
+  lastSync: HTMLElement | null;
+  bookmarkCount: HTMLElement | null;
+  syncButton: HTMLButtonElement | null;
+  syncProgress: HTMLElement | null;
+  syncStatus: HTMLElement | null;
+  progressFill: HTMLElement | null;
+  // 设置表单元素
+  syncType: HTMLSelectElement | null;
+  token: HTMLInputElement | null;
+  owner: HTMLInputElement | null;
+  repo: HTMLInputElement | null;
+  branch: HTMLInputElement | null;
+  gistId: HTMLInputElement | null;
+  autoSync: HTMLInputElement | null;
+  syncInterval: HTMLSelectElement | null;
+  testConnection: HTMLButtonElement | null;
+  saveSettings: HTMLButtonElement | null;
+  repositorySettings: HTMLElement | null;
+  gistSettings: HTMLElement | null;
+}
+
 export class PopupPage {
   private bookmarkService: BookmarkService;
   private configService: ConfigService;
   private githubService: GitHubService;
+  private syncService: SyncService;
   private toast: Toast;
   private logger: Logger;
-
+  private elements: Elements;
   private syncInProgress = false;
-
-  // UI元素
-  private elements: {
-    syncPanel: HTMLElement | null;
-    settingsPanel: HTMLElement | null;
-    settingsButton: HTMLElement | null;
-    lastSync: HTMLElement | null;
-    bookmarkCount: HTMLElement | null;
-    syncButton: HTMLButtonElement | null;
-    syncProgress: HTMLElement | null;
-    syncStatus: HTMLElement | null;
-    progressFill: HTMLElement | null;
-    // 设置表单元素
-    syncType: HTMLSelectElement | null;
-    token: HTMLInputElement | null;
-    owner: HTMLInputElement | null;
-    repo: HTMLInputElement | null;
-    branch: HTMLInputElement | null;
-    gistId: HTMLInputElement | null;
-    autoSync: HTMLInputElement | null;
-    syncInterval: HTMLSelectElement | null;
-    testConnection: HTMLButtonElement | null;
-    saveSettings: HTMLButtonElement | null;
-    repositorySettings: HTMLElement | null;
-    gistSettings: HTMLElement | null;
-  } = {
-    syncPanel: null,
-    settingsPanel: null,
-    settingsButton: null,
-    lastSync: null,
-    bookmarkCount: null,
-    syncButton: null,
-    syncProgress: null,
-    syncStatus: null,
-    progressFill: null,
-    // 设置表单元素
-    syncType: null,
-    token: null,
-    owner: null,
-    repo: null,
-    branch: null,
-    gistId: null,
-    autoSync: null,
-    syncInterval: null,
-    testConnection: null,
-    saveSettings: null,
-    repositorySettings: null,
-    gistSettings: null
-  };
 
   constructor() {
     logger.info('初始化PopupManager');
     this.bookmarkService = BookmarkService.getInstance();
-    this.configService = new ConfigService();
+    this.configService = ConfigService.getInstance();
     this.githubService = GitHubService.getInstance();
+    this.syncService = SyncService.getInstance();
     this.toast = new Toast();
     this.logger = Logger.getInstance();
+
+    this.elements = {
+      syncPanel: null,
+      settingsPanel: null,
+      settingsButton: null,
+      lastSync: null,
+      bookmarkCount: null,
+      syncButton: null,
+      syncProgress: null,
+      syncStatus: null,
+      progressFill: null,
+      // 设置表单元素
+      syncType: null,
+      token: null,
+      owner: null,
+      repo: null,
+      branch: null,
+      gistId: null,
+      autoSync: null,
+      syncInterval: null,
+      testConnection: null,
+      saveSettings: null,
+      repositorySettings: null,
+      gistSettings: null
+    };
 
     this.initializeElements();
     this.initializeEventListeners();
@@ -111,21 +116,13 @@ export class PopupPage {
     // 验证必要的元素是否存在
     const requiredElements = ['syncPanel', 'settingsPanel', 'settingsButton', 'syncButton'];
     requiredElements.forEach(elementId => {
-      if (!this.elements[elementId as keyof typeof this.elements]) {
+      if (!this.elements[elementId as keyof Elements]) {
         this.logger.error(`Required element not found: ${elementId}`);
       }
     });
   }
 
   private async initializeEventListeners(): Promise<void> {
-    // 同步按钮
-    const syncButton = document.getElementById('syncButton');
-    syncButton?.addEventListener('click', () => this.handleSync());
-
-    // 设置按钮
-    const settingsButton = document.getElementById('settingsButton');
-    settingsButton?.addEventListener('click', () => this.openSettings());
-
     // 同步类型切换事件
     this.elements.syncType?.addEventListener('change', () => this.updateSyncTypeVisibility());
 
@@ -134,6 +131,9 @@ export class PopupPage {
 
     // 保存设置按钮点击事件
     this.elements.saveSettings?.addEventListener('click', () => this.saveSettings());
+
+    // 同步按钮点击事件
+    this.elements.syncButton?.addEventListener('click', () => this.handleSync());
   }
 
   private async loadInitialState(): Promise<void> {
@@ -158,16 +158,13 @@ export class PopupPage {
   }
 
   private togglePanel(): void {
-    const syncPanel = this.elements.syncPanel;
-    const settingsPanel = this.elements.settingsPanel;
-    
-    if (syncPanel && settingsPanel) {
-      if (syncPanel.classList.contains('active')) {
-        syncPanel.classList.remove('active');
-        settingsPanel.classList.add('active');
+    if (this.elements.syncPanel && this.elements.settingsPanel) {
+      if (this.elements.syncPanel.classList.contains('active')) {
+        this.elements.syncPanel.classList.remove('active');
+        this.elements.settingsPanel.classList.add('active');
       } else {
-        settingsPanel.classList.remove('active');
-        syncPanel.classList.add('active');
+        this.elements.settingsPanel.classList.remove('active');
+        this.elements.syncPanel.classList.add('active');
       }
     }
   }
@@ -177,14 +174,14 @@ export class PopupPage {
       const config = await this.configService.getConfig();
       
       // 填充表单
-      if (this.elements.syncType) this.elements.syncType.value = config.syncType;
+      if (this.elements.syncType) this.elements.syncType.value = config.syncType === 'repo' ? 'repository' : 'gist';
       if (this.elements.token) this.elements.token.value = config.gitConfig.token;
-      if (this.elements.owner) this.elements.owner.value = config.gitConfig.owner;
-      if (this.elements.repo) this.elements.repo.value = config.gitConfig.repo;
-      if (this.elements.branch) this.elements.branch.value = config.gitConfig.branch;
+      if (this.elements.owner) this.elements.owner.value = config.gitConfig.owner || '';
+      if (this.elements.repo) this.elements.repo.value = config.gitConfig.repo || '';
+      if (this.elements.branch) this.elements.branch.value = config.gitConfig.branch || '';
       if (this.elements.gistId) this.elements.gistId.value = config.gitConfig.gistId || '';
       if (this.elements.autoSync) this.elements.autoSync.checked = config.autoSync;
-      if (this.elements.syncInterval) this.elements.syncInterval.value = String(config.autoSyncInterval);
+      if (this.elements.syncInterval) this.elements.syncInterval.value = String(config.syncInterval);
 
       this.updateSyncTypeVisibility();
     } catch (error) {
@@ -194,13 +191,9 @@ export class PopupPage {
   }
 
   private updateSyncTypeVisibility(): void {
-    const syncType = this.elements.syncType?.value;
-    const repoSettings = this.elements.repositorySettings;
-    const gistSettings = this.elements.gistSettings;
-
-    if (repoSettings && gistSettings) {
-      repoSettings.style.display = syncType === 'repository' ? 'block' : 'none';
-      gistSettings.style.display = syncType === 'gist' ? 'block' : 'none';
+    if (this.elements.repositorySettings && this.elements.gistSettings) {
+      this.elements.repositorySettings.style.display = this.elements.syncType?.value === 'repository' ? 'block' : 'none';
+      this.elements.gistSettings.style.display = this.elements.syncType?.value === 'gist' ? 'block' : 'none';
     }
   }
 
@@ -223,16 +216,16 @@ export class PopupPage {
 
   private async saveSettings(): Promise<void> {
     try {
-      const config = {
-        syncType: this.elements.syncType?.value as 'repository' | 'gist',
+      const config: Partial<SyncConfig> = {
+        syncType: this.elements.syncType?.value === 'repository' ? 'repo' : 'gist',
         autoSync: this.elements.autoSync?.checked || false,
-        autoSyncInterval: Number(this.elements.syncInterval?.value) || 300000,
+        syncInterval: Number(this.elements.syncInterval?.value) || 300000,
         gitConfig: {
           token: this.elements.token?.value || '',
-          owner: this.elements.owner?.value || '',
-          repo: this.elements.repo?.value || '',
+          owner: this.elements.owner?.value || undefined,
+          repo: this.elements.repo?.value || undefined,
           branch: this.elements.branch?.value || 'main',
-          gistId: this.elements.gistId?.value
+          gistId: this.elements.gistId?.value || undefined
         }
       };
 
@@ -246,34 +239,23 @@ export class PopupPage {
   }
 
   private updateSyncStatus(status: string, progress: number): void {
-    const statusText = this.elements.syncStatus;
-    const progressFill = this.elements.progressFill;
-    const percentageText = document.getElementById('syncPercentage');
-
-    if (statusText) {
-      statusText.textContent = status;
+    if (this.elements.syncStatus) {
+      this.elements.syncStatus.textContent = status;
     }
-
-    if (progressFill) {
-      progressFill.style.width = `${progress}%`;
-    }
-
-    if (percentageText) {
-      percentageText.textContent = `${progress}%`;
+    if (this.elements.syncProgress) {
+      this.elements.syncProgress.style.width = `${progress}%`;
     }
   }
 
   private updateBookmarkCount(count: number): void {
-    const countElement = this.elements.bookmarkCount;
-    if (countElement) {
-      countElement.textContent = count.toString();
+    if (this.elements.bookmarkCount) {
+      this.elements.bookmarkCount.textContent = String(count);
     }
   }
 
   private async updateLastSyncTime(time: Date | null): Promise<void> {
-    const lastSyncElement = this.elements.lastSync;
-    if (lastSyncElement) {
-      lastSyncElement.textContent = time ? this.formatDate(time) : '从未同步';
+    if (this.elements.lastSync) {
+      this.elements.lastSync.textContent = time ? this.formatDate(time) : '从未同步';
     }
   }
 
@@ -305,37 +287,14 @@ export class PopupPage {
   }
 
   private showError(message: string): void {
-    const errorContainer = document.createElement('div');
-    errorContainer.className = 'error-message';
-    errorContainer.textContent = message;
-    
-    const messageContainer = document.getElementById('messageContainer');
-    if (messageContainer) {
-      messageContainer.innerHTML = '';
-      messageContainer.appendChild(errorContainer);
-      
-      // 3秒后自动消失
+    const errorElement = document.getElementById('errorMessage');
+    if (errorElement) {
+      errorElement.textContent = message;
+      errorElement.style.display = 'block';
       setTimeout(() => {
-        errorContainer.remove();
+        errorElement.style.display = 'none';
       }, 3000);
     }
-  }
-
-  private openSettings(): void {
-    chrome.runtime.openOptionsPage();
-  }
-
-  private async getLastSyncTime(): Promise<Date | null> {
-    const result = await chrome.storage.local.get('lastSyncTime');
-    return result.lastSyncTime ? new Date(result.lastSyncTime) : null;
-  }
-
-  private async getSyncStatus(): Promise<{ inProgress: boolean; progress: number }> {
-    const result = await chrome.storage.local.get(['syncInProgress', 'syncProgress']);
-    return {
-      inProgress: result.syncInProgress || false,
-      progress: result.syncProgress || 0
-    };
   }
 
   private async handleSync(): Promise<void> {
@@ -355,14 +314,7 @@ export class PopupPage {
       }
 
       // 开始同步
-      await this.githubService.authenticate();
-      
-      // 获取所有书签
-      const bookmarks = await this.bookmarkService.getAllBookmarks();
-      this.updateSyncStatus('正在上传书签...', 30);
-
-      // 上传书签
-      await this.uploadBookmarks(bookmarks);
+      await this.syncService.sync();
       this.updateSyncStatus('同步完成', 100);
 
       // 更新最后同步时间
@@ -371,6 +323,7 @@ export class PopupPage {
       await this.updateLastSyncTime(now);
       
       // 更新书签数量
+      const bookmarks = await this.bookmarkService.getAllBookmarks();
       this.updateBookmarkCount(bookmarks.length);
 
     } catch (error) {
@@ -384,13 +337,22 @@ export class PopupPage {
     }
   }
 
-  private async uploadBookmarks(bookmarks: any[]): Promise<void> {
-    // TODO: 实现实际的上传逻辑
-    await new Promise(resolve => setTimeout(resolve, 1000)); // 模拟上传
+  private async getLastSyncTime(): Promise<Date | null> {
+    const config = await this.configService.getConfig();
+    return config.lastSyncTime ? new Date(config.lastSyncTime) : null;
+  }
+
+  private async getSyncStatus(): Promise<{ inProgress: boolean; progress: number }> {
+    return {
+      inProgress: this.syncInProgress,
+      progress: 0
+    };
   }
 
   private async saveLastSyncTime(time: Date): Promise<void> {
-    await chrome.storage.local.set({ lastSyncTime: time.getTime() });
+    await this.configService.updateConfig({
+      lastSyncTime: time.getTime()
+    });
   }
 }
 

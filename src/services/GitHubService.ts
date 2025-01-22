@@ -1,7 +1,7 @@
 import { Logger } from '../utils/logger';
 import { ConfigService } from './ConfigService';
 import { RetryHelper } from '../utils/retry';
-import { ProgressNotification, ProgressEventType, BookmarkNode } from '../types/bookmark';
+import { BookmarkNode, ProgressNotification, ProgressEventType, BookmarkSyncData } from '../types/bookmark';
 
 export interface GitHubConfig {
   clientId: string;
@@ -25,6 +25,10 @@ export class GitHubService {
   private logger: Logger;
   private configService: ConfigService;
   private progressListeners: ((notification: ProgressNotification) => void)[] = [];
+  private readonly API_BASE = 'https://api.github.com';
+  private readonly DEFAULT_BRANCH = 'main';
+  private readonly SYNC_FILE = 'bookmarks.json';
+  private readonly SYNC_VERSION = '1.0.0';
 
   private constructor() {
     this.logger = Logger.getInstance();
@@ -67,9 +71,10 @@ export class GitHubService {
       
       // 验证token有效性
       await RetryHelper.execute(async () => {
-        const response = await fetch('https://api.github.com/user', {
+        const response = await fetch(`${this.API_BASE}/user`, {
           headers: {
             'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
           }
         });
         
@@ -100,11 +105,26 @@ export class GitHubService {
         type: ProgressEventType.START,
         message: '开始上传书签...'
       });
+
+      const normalizedBookmarks = bookmarks.map((node, index) => this.normalizeBookmark(node, index));
+      const deviceId = await this.configService.getDeviceId();
+      const syncData: BookmarkSyncData = {
+        version: this.SYNC_VERSION,
+        lastModified: Date.now(),
+        deviceId,
+        bookmarks: normalizedBookmarks,
+        metadata: {
+          totalCount: this.countBookmarks(normalizedBookmarks),
+          folderCount: this.countFolders(normalizedBookmarks),
+          lastSync: Date.now(),
+          syncVersion: this.SYNC_VERSION
+        }
+      };
       
       if (config.syncType === 'gist') {
-        await this.uploadToGist(bookmarks);
+        await this.uploadToGist(syncData);
       } else {
-        await this.uploadToRepo(bookmarks);
+        await this.uploadToRepo(syncData);
       }
       
       this.notifyProgress({
@@ -121,9 +141,9 @@ export class GitHubService {
     }
   }
 
-  private async uploadToGist(bookmarks: BookmarkNode[]): Promise<void> {
+  private async uploadToGist(syncData: BookmarkSyncData): Promise<void> {
     const config = await this.configService.getConfig();
-    const content = JSON.stringify(bookmarks, null, 2);
+    const content = JSON.stringify(syncData, null, 2);
     
     await RetryHelper.execute(async () => {
       if (!config.gitConfig.gistId) {
@@ -133,17 +153,18 @@ export class GitHubService {
           progress: 30
         });
         // 创建新的Gist
-        const response = await fetch('https://api.github.com/gists', {
+        const response = await fetch(`${this.API_BASE}/gists`, {
           method: 'POST',
           headers: {
             'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json',
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             description: 'Browser Bookmarks Sync',
             public: false,
             files: {
-              'bookmarks.json': {
+              [this.SYNC_FILE]: {
                 content
               }
             }
@@ -168,15 +189,16 @@ export class GitHubService {
           progress: 50
         });
         // 更新已有的Gist
-        const response = await fetch(`https://api.github.com/gists/${config.gitConfig.gistId}`, {
+        const response = await fetch(`${this.API_BASE}/gists/${config.gitConfig.gistId}`, {
           method: 'PATCH',
           headers: {
             'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json',
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             files: {
-              'bookmarks.json': {
+              [this.SYNC_FILE]: {
                 content
               }
             }
@@ -190,25 +212,42 @@ export class GitHubService {
     });
   }
 
-  private async uploadToRepo(bookmarks: BookmarkNode[]): Promise<void> {
+  private async uploadToRepo(syncData: BookmarkSyncData): Promise<void> {
     const config = await this.configService.getConfig();
-    const content = JSON.stringify(bookmarks, null, 2);
-    const path = 'bookmarks.json';
+    const content = JSON.stringify(syncData, null, 2);
     
     await RetryHelper.execute(async () => {
       this.notifyProgress({
         type: ProgressEventType.PROGRESS,
-        message: '检查仓库文件状态...',
+        message: '检查仓库状态...',
         progress: 30
       });
+
+      // 确保仓库存在
+      if (!config.gitConfig.owner || !config.gitConfig.repo) {
+        throw new Error('仓库配置不完整');
+      }
+      await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
+
+      // 确保分支存在
+      const branch = config.gitConfig.branch || this.DEFAULT_BRANCH;
+      await this.ensureBranch(config.gitConfig.owner, config.gitConfig.repo, branch);
+
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '检查文件状态...',
+        progress: 50
+      });
+
       // 获取文件SHA（如果存在）
       let sha: string | undefined;
       try {
         const response = await fetch(
-          `https://api.github.com/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${path}?ref=${config.gitConfig.branch}`,
+          `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}?ref=${branch}`,
           {
             headers: {
               'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json'
             }
           }
         );
@@ -223,21 +262,23 @@ export class GitHubService {
       this.notifyProgress({
         type: ProgressEventType.PROGRESS,
         message: '上传文件到仓库...',
-        progress: 60
+        progress: 70
       });
+
       // 创建或更新文件
       const response = await fetch(
-        `https://api.github.com/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${path}`,
+        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}`,
         {
           method: 'PUT',
           headers: {
             'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json',
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            message: '更新书签',
+            message: '更新书签同步数据',
             content: Buffer.from(content).toString('base64'),
-            branch: config.gitConfig.branch,
+            branch,
             ...(sha ? { sha } : {})
           })
         }
@@ -247,6 +288,121 @@ export class GitHubService {
         throw new Error('上传到仓库失败');
       }
     });
+  }
+
+  private async ensureRepository(owner: string, repo: string): Promise<void> {
+    try {
+      const response = await fetch(
+        `${this.API_BASE}/repos/${owner}/${repo}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        // 仓库不存在，创建新仓库
+        const createResponse = await fetch(
+          `${this.API_BASE}/user/repos`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              name: repo,
+              private: true,
+              auto_init: true,
+              description: 'Browser Bookmarks Sync Repository'
+            })
+          }
+        );
+
+        if (!createResponse.ok) {
+          throw new Error('创建仓库失败');
+        }
+      }
+    } catch (error) {
+      throw new Error(`确保仓库存在时出错: ${error}`);
+    }
+  }
+
+  private async ensureBranch(owner: string, repo: string, branch: string): Promise<void> {
+    try {
+      const response = await fetch(
+        `${this.API_BASE}/repos/${owner}/${repo}/branches/${branch}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        // 分支不存在，创建新分支
+        const defaultBranchResponse = await fetch(
+          `${this.API_BASE}/repos/${owner}/${repo}`,
+          {
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json'
+            }
+          }
+        );
+
+        if (!defaultBranchResponse.ok) {
+          throw new Error('获取默认分支失败');
+        }
+
+        const repoInfo = await defaultBranchResponse.json();
+        const defaultBranch = repoInfo.default_branch;
+
+        // 获取默认分支的最新commit
+        const refResponse = await fetch(
+          `${this.API_BASE}/repos/${owner}/${repo}/git/refs/heads/${defaultBranch}`,
+          {
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json'
+            }
+          }
+        );
+
+        if (!refResponse.ok) {
+          throw new Error('获取默认分支引用失败');
+        }
+
+        const refData = await refResponse.json();
+        
+        // 创建新分支
+        const createBranchResponse = await fetch(
+          `${this.API_BASE}/repos/${owner}/${repo}/git/refs`,
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              ref: `refs/heads/${branch}`,
+              sha: refData.object.sha
+            })
+          }
+        );
+
+        if (!createBranchResponse.ok) {
+          throw new Error('创建分支失败');
+        }
+      }
+    } catch (error) {
+      throw new Error(`确保分支存在时出错: ${error}`);
+    }
   }
 
   public async downloadBookmarks(): Promise<BookmarkNode[]> {
@@ -259,18 +415,24 @@ export class GitHubService {
       await this.authenticate();
       const config = await this.configService.getConfig();
       
-      let bookmarks: BookmarkNode[];
+      let syncData: BookmarkSyncData;
       if (config.syncType === 'gist') {
-        bookmarks = await this.downloadFromGist();
+        syncData = await this.downloadFromGist();
       } else {
-        bookmarks = await this.downloadFromRepo();
+        syncData = await this.downloadFromRepo();
       }
       
       this.notifyProgress({
         type: ProgressEventType.SUCCESS,
         message: '书签下载完成'
       });
-      return bookmarks;
+
+      // 更新最后同步时间
+      await this.configService.updateConfig({
+        lastSyncTime: Date.now()
+      });
+
+      return syncData.bookmarks;
     } catch (error: any) {
       this.notifyProgress({
         type: ProgressEventType.ERROR,
@@ -280,7 +442,7 @@ export class GitHubService {
     }
   }
 
-  private async downloadFromGist(): Promise<BookmarkNode[]> {
+  private async downloadFromGist(): Promise<BookmarkSyncData> {
     const config = await this.configService.getConfig();
     if (!config.gitConfig.gistId) {
       throw new Error('Gist ID未设置');
@@ -293,26 +455,32 @@ export class GitHubService {
         progress: 50
       });
       
-      const response = await fetch(`https://api.github.com/gists/${config.gitConfig.gistId}`, {
-        headers: {
-          'Authorization': `token ${this.token}`,
+      const response = await fetch(
+        `${this.API_BASE}/gists/${config.gitConfig.gistId}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
         }
-      });
+      );
 
       if (!response.ok) {
         throw new Error('从Gist下载失败');
       }
 
       const data = await response.json();
-      const content = data.files['bookmarks.json'].content;
-      const bookmarks = JSON.parse(content);
-      return this.normalizeBookmarks(bookmarks);
+      const content = data.files[this.SYNC_FILE].content;
+      return JSON.parse(content);
     });
   }
 
-  private async downloadFromRepo(): Promise<BookmarkNode[]> {
+  private async downloadFromRepo(): Promise<BookmarkSyncData> {
     const config = await this.configService.getConfig();
-    const path = 'bookmarks.json';
+    if (!config.gitConfig.owner || !config.gitConfig.repo) {
+      throw new Error('仓库配置不完整');
+    }
+    const branch = config.gitConfig.branch || this.DEFAULT_BRANCH;
 
     return await RetryHelper.execute(async () => {
       this.notifyProgress({
@@ -322,10 +490,11 @@ export class GitHubService {
       });
       
       const response = await fetch(
-        `https://api.github.com/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${path}?ref=${config.gitConfig.branch}`,
+        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}?ref=${branch}`,
         {
           headers: {
             'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
           }
         }
       );
@@ -336,25 +505,40 @@ export class GitHubService {
 
       const data = await response.json();
       const content = Buffer.from(data.content, 'base64').toString('utf-8');
-      const bookmarks = JSON.parse(content);
-      return this.normalizeBookmarks(bookmarks);
+      return JSON.parse(content);
     });
   }
 
-  private normalizeBookmarks(bookmarks: any[]): BookmarkNode[] {
-    const normalize = (node: any, index: number): BookmarkNode => {
-      return {
-        id: node.id || String(Date.now() + index),
-        title: node.title || '',
-        url: node.url,
-        parentId: node.parentId,
-        dateAdded: node.dateAdded || Date.now(),
-        index: node.index || index,
-        children: node.children?.map((child: any, idx: number) => normalize(child, idx))
-      };
+  private countBookmarks(bookmarks: BookmarkNode[]): number {
+    let count = 0;
+    const countNodes = (nodes: BookmarkNode[]) => {
+      for (const node of nodes) {
+        if (node.url) {
+          count++;
+        }
+        if (node.children) {
+          countNodes(node.children);
+        }
+      }
     };
-    
-    return bookmarks.map((node, index) => normalize(node, index));
+    countNodes(bookmarks);
+    return count;
+  }
+
+  private countFolders(bookmarks: BookmarkNode[]): number {
+    let count = 0;
+    const countNodes = (nodes: BookmarkNode[]) => {
+      for (const node of nodes) {
+        if (!node.url) {
+          count++;
+        }
+        if (node.children) {
+          countNodes(node.children);
+        }
+      }
+    };
+    countNodes(bookmarks);
+    return count;
   }
 
   public async getToken(): Promise<GitHubToken | null> {
@@ -387,6 +571,18 @@ export class GitHubService {
       this.logger.error('清除GitHub令牌失败:', error);
       throw error;
     }
+  }
+
+  private normalizeBookmark(node: chrome.bookmarks.BookmarkTreeNode, index: number): BookmarkNode {
+    return {
+      id: node.id,
+      title: node.title || '',
+      url: node.url,
+      parentId: node.parentId || undefined,
+      dateAdded: node.dateAdded || Date.now(),
+      index: node.index || index,
+      children: node.children?.map((child, idx) => this.normalizeBookmark(child, idx))
+    };
   }
 }
 

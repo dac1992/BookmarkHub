@@ -12,6 +12,7 @@ export interface SyncConfig {
     branch?: string;
   };
   lastSyncTime?: number;
+  deviceId?: string;
 }
 
 const DEFAULT_CONFIG: SyncConfig = {
@@ -100,5 +101,15 @@ export class ConfigService {
       this.logger.error('清除配置失败:', error);
       throw error;
     }
+  }
+
+  public async getDeviceId(): Promise<string> {
+    const config = await this.getConfig();
+    if (!config.deviceId) {
+      const deviceId = `device_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      await this.updateConfig({ deviceId });
+      return deviceId;
+    }
+    return config.deviceId;
   }
 } 

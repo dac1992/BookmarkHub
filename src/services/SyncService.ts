@@ -1,27 +1,24 @@
 import { Logger } from '../utils/logger';
-import { BookmarkService } from './BookmarkService';
-import { GitHubService } from './GitHubService';
 import { ConfigService } from './ConfigService';
-import { ProgressNotification, ProgressEventType } from '../types/bookmark';
+import { GitHubService } from './GitHubService';
+import { BookmarkService } from './BookmarkService';
+import { BookmarkNode, BookmarkChange, ProgressNotification, ProgressEventType } from '../types/bookmark';
 
 export class SyncService {
   private static instance: SyncService;
   private logger: Logger;
-  private bookmarkService: BookmarkService;
-  private githubService: GitHubService;
   private configService: ConfigService;
-  private autoSyncTimer: number | null = null;
-  private isSyncing: boolean = false;
+  private githubService: GitHubService;
+  private bookmarkService: BookmarkService;
   private progressListeners: ((notification: ProgressNotification) => void)[] = [];
+  private syncInProgress = false;
+  private autoSyncTimer: number | null = null;
 
   private constructor() {
     this.logger = Logger.getInstance();
-    this.bookmarkService = BookmarkService.getInstance();
-    this.githubService = GitHubService.getInstance();
     this.configService = ConfigService.getInstance();
-    
-    // 转发 GitHub 服务的进度通知
-    this.githubService.addProgressListener(this.handleGitHubProgress.bind(this));
+    this.githubService = GitHubService.getInstance();
+    this.bookmarkService = BookmarkService.getInstance();
   }
 
   public static getInstance(): SyncService {
@@ -46,85 +43,30 @@ export class SyncService {
     this.progressListeners.forEach(listener => listener(notification));
   }
 
-  private handleGitHubProgress(notification: ProgressNotification): void {
-    this.progressListeners.forEach(listener => listener(notification));
-  }
-
-  public async startAutoSync(): Promise<void> {
-    const config = await this.configService.getConfig();
-    if (!config.autoSync) {
-      return;
-    }
-
-    // 清除现有的定时器
-    if (this.autoSyncTimer) {
-      window.clearInterval(this.autoSyncTimer);
-    }
-
-    // 设置新的定时器
-    this.autoSyncTimer = window.setInterval(
-      async () => {
-        try {
-          await this.sync();
-        } catch (error) {
-          this.logger.error('自动同步失败:', error);
-        }
-      },
-      config.syncInterval * 60 * 1000
-    );
-
-    this.logger.info(`自动同步已启动，间隔: ${config.syncInterval}分钟`);
-  }
-
-  public stopAutoSync(): void {
-    if (this.autoSyncTimer) {
-      window.clearInterval(this.autoSyncTimer);
-      this.autoSyncTimer = null;
-      this.logger.info('自动同步已停止');
-    }
-  }
-
   public async sync(): Promise<void> {
-    if (this.isSyncing) {
-      this.logger.warn('同步正在进行中，请稍后再试');
+    if (this.syncInProgress) {
+      this.logger.info('同步已在进行中');
       return;
     }
 
-    this.isSyncing = true;
+    this.syncInProgress = true;
     this.notifyProgress({
       type: ProgressEventType.START,
-      message: '开始同步书签...'
+      message: '开始同步...'
     });
 
     try {
       // 验证配置
       const errors = await this.configService.validateConfig();
       if (errors.length > 0) {
-        throw new Error(`配置错误: ${errors.join(', ')}`);
+        throw new Error('配置验证失败: ' + errors.join(', '));
       }
 
       // 获取本地书签
       const localBookmarks = await this.bookmarkService.getAllBookmarks();
       
-      try {
-        // 尝试下载远程书签
-        const remoteBookmarks = await this.githubService.downloadBookmarks();
-        
-        // 如果远程书签存在，进行合并
-        if (remoteBookmarks) {
-          await this.mergeBookmarks(localBookmarks, remoteBookmarks);
-        } else {
-          // 如果远程没有书签，直接上传本地书签
-          await this.githubService.uploadBookmarks(localBookmarks);
-        }
-      } catch (error: any) {
-        if (error.message.includes('404')) {
-          // 如果远程仓库为空，直接上传本地书签
-          await this.githubService.uploadBookmarks(localBookmarks);
-        } else {
-          throw error;
-        }
-      }
+      // 上传到GitHub
+      await this.githubService.uploadBookmarks(localBookmarks);
 
       // 更新最后同步时间
       await this.configService.updateConfig({
@@ -133,56 +75,71 @@ export class SyncService {
 
       this.notifyProgress({
         type: ProgressEventType.SUCCESS,
-        message: '书签同步完成'
+        message: '同步完成'
       });
     } catch (error: any) {
+      this.logger.error('同步失败:', error);
       this.notifyProgress({
         type: ProgressEventType.ERROR,
         message: `同步失败: ${error.message}`
       });
       throw error;
     } finally {
-      this.isSyncing = false;
+      this.syncInProgress = false;
     }
   }
 
-  private async mergeBookmarks(
-    local: chrome.bookmarks.BookmarkTreeNode[],
-    remote: chrome.bookmarks.BookmarkTreeNode[]
-  ): Promise<void> {
-    // TODO: 实现更复杂的合并逻辑
-    // 目前简单地使用最新的版本
-    const localTime = await this.getLastModifiedTime(local);
-    const remoteTime = await this.getLastModifiedTime(remote);
-
-    if (localTime > remoteTime) {
-      // 本地版本更新，上传到远程
-      await this.githubService.uploadBookmarks(local);
-    } else if (remoteTime > localTime) {
-      // 远程版本更新，更新本地
-      await this.bookmarkService.updateAllBookmarks(remote);
+  public async startAutoSync(): Promise<void> {
+    const config = await this.configService.getConfig();
+    if (!config.autoSync) {
+      this.logger.info('自动同步未启用');
+      return;
     }
-    // 如果时间相同，不需要操作
+
+    if (this.autoSyncTimer !== null) {
+      this.stopAutoSync();
+    }
+
+    const interval = config.syncInterval * 60 * 1000; // 转换为毫秒
+    this.autoSyncTimer = window.setInterval(() => {
+      this.sync().catch(error => {
+        this.logger.error('自动同步失败:', error);
+      });
+    }, interval);
+
+    this.logger.info(`自动同步已启动，间隔: ${config.syncInterval}分钟`);
   }
 
-  private async getLastModifiedTime(bookmarks: chrome.bookmarks.BookmarkTreeNode[]): Promise<number> {
-    // 递归查找最新的修改时间
-    const findLatestTime = (nodes: chrome.bookmarks.BookmarkTreeNode[]): number => {
-      let latestTime = 0;
-      for (const node of nodes) {
-        if (node.dateGroupModified) {
-          latestTime = Math.max(latestTime, node.dateGroupModified);
-        }
-        if (node.dateAdded) {
-          latestTime = Math.max(latestTime, node.dateAdded);
-        }
-        if (node.children) {
-          latestTime = Math.max(latestTime, findLatestTime(node.children));
-        }
-      }
-      return latestTime;
+  public stopAutoSync(): void {
+    if (this.autoSyncTimer !== null) {
+      window.clearInterval(this.autoSyncTimer);
+      this.autoSyncTimer = null;
+      this.logger.info('自动同步已停止');
+    }
+  }
+
+  public async handleBookmarkChange(change: BookmarkChange): Promise<void> {
+    const config = await this.configService.getConfig();
+    if (!config.autoSync) {
+      return;
+    }
+
+    try {
+      await this.sync();
+    } catch (error) {
+      this.logger.error('处理书签变更失败:', error);
+    }
+  }
+
+  private normalizeBookmark(node: chrome.bookmarks.BookmarkTreeNode, index: number): BookmarkNode {
+    return {
+      id: node.id,
+      title: node.title || '',
+      url: node.url,
+      parentId: node.parentId || undefined,
+      dateAdded: node.dateAdded || Date.now(),
+      index: node.index || index,
+      children: node.children?.map((child, idx) => this.normalizeBookmark(child, idx))
     };
-
-    return findLatestTime(bookmarks);
   }
 } 
