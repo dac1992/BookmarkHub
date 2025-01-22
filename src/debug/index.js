@@ -3,6 +3,9 @@ import { ConfigService } from '../services/ConfigService';
 
 class DebugPage {
   constructor() {
+    this.configService = ConfigService.getInstance();
+    this.logger = Logger.getInstance();
+    this.loggedMessages = new Set();
     this.initElements();
     this.bindEvents();
     this.loadConfig().catch(error => {
@@ -32,11 +35,13 @@ class DebugPage {
   bindEvents() {
     // 监听配置变化
     chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName === 'local' && changes['synctags_config']) {
-        const { newValue, oldValue } = changes['synctags_config'];
-        if (newValue) {
+      if (areaName === 'local' && changes[ConfigService.STORAGE_KEY]) {
+        const { newValue, oldValue } = changes[ConfigService.STORAGE_KEY];
+        if (newValue && JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
           this.log('配置已更新');
-          this.log('旧配置: ' + JSON.stringify(oldValue, null, 2));
+          if (oldValue) {
+            this.log('旧配置: ' + JSON.stringify(oldValue, null, 2));
+          }
           this.log('新配置: ' + JSON.stringify(newValue, null, 2));
           this.updateDisplay(newValue);
         }
@@ -52,9 +57,8 @@ class DebugPage {
         this.log('正在保存配置...');
         this.log('配置内容: ' + JSON.stringify(config, null, 2));
 
-        await chrome.storage.local.set({ 'synctags_config': config });
+        await this.configService.saveConfig(config);
         this.log('配置已保存');
-        this.updateDisplay(config);
       } catch (error) {
         this.log('保存配置失败: ' + error.message, 'error');
         console.error('保存配置失败:', error);
@@ -89,45 +93,21 @@ class DebugPage {
         repo: this.elements.repoName?.value || '',
         branch: this.elements.repoBranch?.value || 'main',
         gistId: this.elements.gistId?.value || ''
-      },
-      _timestamp: Date.now()
+      }
     };
-
-    // 验证配置
-    const errors = this.validateConfig(config);
-    if (errors.length > 0) {
-      this.log('配置验证警告:', 'warn');
-      errors.forEach(error => this.log('- ' + error, 'warn'));
-    }
 
     return config;
   }
 
-  validateConfig(config) {
-    const errors = [];
-
-    if (!config.gitConfig.token.trim()) {
-      errors.push('GitHub Token未设置');
-    }
-
-    if (config.syncType === 'repo') {
-      if (!config.gitConfig.owner.trim()) {
-        errors.push('仓库所有者未设置');
-      }
-      if (!config.gitConfig.repo.trim()) {
-        errors.push('仓库名称未设置');
-      }
-    }
-
-    if (config.syncInterval < 1) {
-      errors.push('同步间隔必须大于0');
-    }
-
-    return errors;
-  }
-
   log(message, type = 'info') {
     if (!this.elements.logContainer) return;
+    
+    // 防止重复日志
+    const logKey = `${type}-${message}`;
+    if (this.loggedMessages.has(logKey)) {
+      return;
+    }
+    this.loggedMessages.add(logKey);
     
     const time = new Date().toLocaleTimeString();
     const entry = document.createElement('div');
@@ -138,6 +118,11 @@ class DebugPage {
     
     // 同时输出到控制台
     console.log(`[${type}] ${message}`);
+    
+    // 5分钟后清理日志key
+    setTimeout(() => {
+      this.loggedMessages.delete(logKey);
+    }, 300000);
   }
 
   updateDisplay(config) {
@@ -179,8 +164,7 @@ class DebugPage {
   async loadConfig() {
     try {
       this.log('正在加载配置...');
-      const result = await chrome.storage.local.get('synctags_config');
-      const config = result.synctags_config;
+      const config = await this.configService.getConfig();
       
       if (config) {
         this.log('已加载配置');

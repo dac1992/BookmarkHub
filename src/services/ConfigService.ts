@@ -31,10 +31,13 @@ const DEFAULT_CONFIG: SyncConfig = {
 };
 
 export class ConfigService {
-  private static readonly STORAGE_KEY = 'synctags_config';
+  public static readonly STORAGE_KEY = 'synctags_config';
   private static readonly CONFIG_VERSION = '1.0.0';
   private static instance: ConfigService;
   private logger: Logger;
+  private config: SyncConfig | null = null;
+  private lastSaveTimestamp: number = 0;
+  private readonly SAVE_DEBOUNCE_TIME = 1000; // 1秒内的保存请求会被合并
 
   private constructor() {
     this.logger = Logger.getInstance();
@@ -47,8 +50,30 @@ export class ConfigService {
     return ConfigService.instance;
   }
 
+  private async ensureStoragePermission(): Promise<void> {
+    if (!chrome.storage?.local) {
+      throw new Error('Storage API not available');
+    }
+    
+    // 验证存储权限
+    try {
+      await chrome.storage.local.get('test');
+    } catch (error) {
+      throw new Error('Storage permission not granted');
+    }
+  }
+
   public async saveConfig(config: Partial<SyncConfig>): Promise<void> {
     try {
+      // 防止短时间内重复保存
+      const now = Date.now();
+      if (now - this.lastSaveTimestamp < this.SAVE_DEBOUNCE_TIME) {
+        this.logger.debug('忽略重复保存请求');
+        return;
+      }
+      this.lastSaveTimestamp = now;
+
+      await this.ensureStoragePermission();
       this.logger.debug('开始保存配置...', config);
       
       // 获取当前配置
@@ -74,7 +99,7 @@ export class ConfigService {
       const fullConfig = {
         ...mergedConfig,
         _version: ConfigService.CONFIG_VERSION,
-        _timestamp: Date.now()
+        _timestamp: now
       };
 
       // 保存到 local storage
@@ -84,6 +109,8 @@ export class ConfigService {
             reject(new Error(`配置保存失败: ${chrome.runtime.lastError.message}`));
             return;
           }
+          // 更新内存中的配置
+          this.config = mergedConfig;
           this.logger.debug('配置保存成功:', fullConfig);
           resolve();
         });
@@ -96,6 +123,13 @@ export class ConfigService {
 
   public async getConfig(): Promise<SyncConfig> {
     try {
+      await this.ensureStoragePermission();
+
+      // 如果内存中有配置且不是首次加载，直接返回
+      if (this.config) {
+        return { ...this.config };
+      }
+
       this.logger.debug('从storage加载配置...');
       
       const result = await new Promise<{ [key: string]: any }>((resolve, reject) => {
@@ -114,13 +148,17 @@ export class ConfigService {
         this.logger.debug('找到已保存的配置');
         // 验证并规范化配置
         const normalizedConfig = this.normalizeConfig(savedConfig);
-        return normalizedConfig;
+        // 更新内存中的配置
+        this.config = normalizedConfig;
+        return { ...normalizedConfig };
       }
 
       this.logger.info('未找到已保存的配置，使用默认配置');
+      this.config = { ...DEFAULT_CONFIG };
       return { ...DEFAULT_CONFIG };
     } catch (error) {
       this.logger.error('加载配置失败:', error);
+      this.config = { ...DEFAULT_CONFIG };
       return { ...DEFAULT_CONFIG };
     }
   }
@@ -180,12 +218,15 @@ export class ConfigService {
 
   public async clearConfig(): Promise<void> {
     try {
+      await this.ensureStoragePermission();
       await new Promise<void>((resolve, reject) => {
         chrome.storage.local.remove(ConfigService.STORAGE_KEY, () => {
           if (chrome.runtime.lastError) {
             reject(new Error(`清除配置失败: ${chrome.runtime.lastError.message}`));
             return;
           }
+          // 清除内存中的配置
+          this.config = null;
           resolve();
         });
       });
