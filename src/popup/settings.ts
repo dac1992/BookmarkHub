@@ -9,134 +9,205 @@ export class SettingsPage {
   private githubService: GitHubService;
   private toast: Toast;
   private logger: Logger;
+  private form: HTMLFormElement | null = null;
+  private elements: {
+    syncType?: HTMLSelectElement;
+    token?: HTMLInputElement;
+    owner?: HTMLInputElement;
+    repo?: HTMLInputElement;
+    branch?: HTMLInputElement;
+    gistId?: HTMLInputElement;
+    autoSync?: HTMLInputElement;
+    syncInterval?: HTMLInputElement;
+    saveBtn?: HTMLButtonElement;
+    testBtn?: HTMLButtonElement;
+  } = {};
 
   constructor() {
     this.configService = ConfigService.getInstance();
     this.githubService = GitHubService.getInstance();
     this.toast = new Toast();
     this.logger = Logger.getInstance();
-
-    this.initializeEventListeners();
-    this.loadSettings();
+    this.init();
   }
 
-  private async loadSettings(): Promise<void> {
+  public async init(): Promise<void> {
+    this.form = document.getElementById('settingsForm') as HTMLFormElement;
+    if (!this.form) {
+      this.logger.error('设置表单未找到');
+      return;
+    }
+
+    this.initElements();
+    await this.loadConfig();
+    this.bindEvents();
+  }
+
+  private initElements(): void {
+    if (!this.form) return;
+
+    this.elements = {
+      syncType: this.form.querySelector('#syncType') as HTMLSelectElement,
+      token: this.form.querySelector('#token') as HTMLInputElement,
+      owner: this.form.querySelector('#owner') as HTMLInputElement,
+      repo: this.form.querySelector('#repo') as HTMLInputElement,
+      branch: this.form.querySelector('#branch') as HTMLInputElement,
+      gistId: this.form.querySelector('#gistId') as HTMLInputElement,
+      autoSync: this.form.querySelector('#autoSync') as HTMLInputElement,
+      syncInterval: this.form.querySelector('#syncInterval') as HTMLInputElement,
+      saveBtn: this.form.querySelector('#saveBtn') as HTMLButtonElement,
+      testBtn: this.form.querySelector('#testBtn') as HTMLButtonElement
+    };
+
+    // 验证所有必要元素是否存在
+    const requiredElements = ['syncType', 'token', 'saveBtn', 'testBtn'] as const;
+    for (const elementId of requiredElements) {
+      if (!this.elements[elementId]) {
+        this.logger.error(`必要元素未找到: ${elementId}`);
+      }
+    }
+  }
+
+  private async loadConfig(): Promise<void> {
     try {
       const config = await this.configService.getConfig();
+      this.logger.debug('加载到的配置:', config);
       
-      // 填充表单
-      const syncTypeSelect = document.getElementById('syncType') as HTMLSelectElement;
-      const tokenInput = document.getElementById('token') as HTMLInputElement;
-      const ownerInput = document.getElementById('owner') as HTMLInputElement;
-      const repoInput = document.getElementById('repo') as HTMLInputElement;
-      const branchInput = document.getElementById('branch') as HTMLInputElement;
-      const gistIdInput = document.getElementById('gistId') as HTMLInputElement;
-      const autoSyncInput = document.getElementById('autoSync') as HTMLInputElement;
-      const syncIntervalSelect = document.getElementById('syncInterval') as HTMLSelectElement;
+      if (!this.elements.syncType) {
+        this.logger.error('同步类型选择器未找到');
+        return;
+      }
 
-      if (syncTypeSelect) syncTypeSelect.value = config.syncType === 'repo' ? 'repository' : 'gist';
-      if (tokenInput) tokenInput.value = config.gitConfig.token;
-      if (ownerInput) ownerInput.value = config.gitConfig.owner || '';
-      if (repoInput) repoInput.value = config.gitConfig.repo || '';
-      if (branchInput) branchInput.value = config.gitConfig.branch || '';
-      if (gistIdInput) gistIdInput.value = config.gitConfig.gistId || '';
-      if (autoSyncInput) autoSyncInput.checked = config.autoSync;
-      if (syncIntervalSelect) syncIntervalSelect.value = String(config.syncInterval);
+      // 设置表单值
+      this.elements.syncType.value = config.syncType === 'repo' ? 'repository' : 'gist';
+      if (this.elements.token) this.elements.token.value = config.gitConfig.token || '';
+      if (this.elements.owner) this.elements.owner.value = config.gitConfig.owner || '';
+      if (this.elements.repo) this.elements.repo.value = config.gitConfig.repo || '';
+      if (this.elements.branch) this.elements.branch.value = config.gitConfig.branch || 'main';
+      if (this.elements.gistId) this.elements.gistId.value = config.gitConfig.gistId || '';
+      if (this.elements.autoSync) this.elements.autoSync.checked = config.autoSync;
+      if (this.elements.syncInterval) this.elements.syncInterval.value = config.syncInterval.toString();
 
-      this.updateSyncTypeVisibility();
+      this.updateVisibility(config.syncType);
     } catch (error) {
-      this.logger.error('加载设置失败:', error);
-      this.toast.error('加载设置失败');
+      this.logger.error('加载配置失败:', error);
+      this.toast.error('加载配置失败');
+    }
+  }
+
+  private bindEvents(): void {
+    if (!this.form) return;
+
+    // 同步类型切换事件
+    this.elements.syncType?.addEventListener('change', (event) => {
+      const value = (event.target as HTMLSelectElement).value;
+      const syncType = value === 'repository' ? 'repo' : 'gist';
+      this.updateVisibility(syncType);
+    });
+
+    // 保存按钮点击事件
+    this.form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await this.saveSettings();
+    });
+
+    // 保存按钮点击事件（备用）
+    this.elements.saveBtn?.addEventListener('click', async () => {
+      await this.saveSettings();
+    });
+
+    // 测试按钮点击事件
+    this.elements.testBtn?.addEventListener('click', async () => {
+      await this.testConnection();
+    });
+  }
+
+  private updateVisibility(syncType: 'gist' | 'repo'): void {
+    if (!this.form) return;
+
+    const repoFields = this.form.querySelectorAll('.repo-field');
+    const gistFields = this.form.querySelectorAll('.gist-field');
+
+    if (syncType === 'repo') {
+      repoFields.forEach(field => (field as HTMLElement).style.display = 'block');
+      gistFields.forEach(field => (field as HTMLElement).style.display = 'none');
+    } else {
+      repoFields.forEach(field => (field as HTMLElement).style.display = 'none');
+      gistFields.forEach(field => (field as HTMLElement).style.display = 'block');
     }
   }
 
   private async saveSettings(): Promise<void> {
     try {
-      const syncTypeSelect = document.getElementById('syncType') as HTMLSelectElement;
-      const tokenInput = document.getElementById('token') as HTMLInputElement;
-      const ownerInput = document.getElementById('owner') as HTMLInputElement;
-      const repoInput = document.getElementById('repo') as HTMLInputElement;
-      const branchInput = document.getElementById('branch') as HTMLInputElement;
-      const gistIdInput = document.getElementById('gistId') as HTMLInputElement;
-      const autoSyncInput = document.getElementById('autoSync') as HTMLInputElement;
-      const syncIntervalSelect = document.getElementById('syncInterval') as HTMLSelectElement;
+      if (!this.form) {
+        throw new Error('表单未初始化');
+      }
 
+      this.logger.debug('开始保存设置...');
+      
+      const syncTypeValue = this.elements.syncType?.value;
+      if (!syncTypeValue) {
+        throw new Error('同步类型未选择');
+      }
+
+      const syncType = syncTypeValue === 'repository' ? 'repo' : 'gist';
+      
       const config: Partial<SyncConfig> = {
-        syncType: syncTypeSelect?.value === 'repository' ? 'repo' : 'gist',
-        autoSync: autoSyncInput?.checked || false,
-        syncInterval: Number(syncIntervalSelect?.value) || 300000,
+        syncType,
+        autoSync: this.elements.autoSync?.checked || false,
+        syncInterval: parseInt(this.elements.syncInterval?.value || '60', 10),
         gitConfig: {
-          token: tokenInput?.value || '',
-          owner: ownerInput?.value || undefined,
-          repo: repoInput?.value || undefined,
-          branch: branchInput?.value || 'main',
-          gistId: gistIdInput?.value || undefined
+          token: this.elements.token?.value || '',
+          owner: this.elements.owner?.value || '',
+          repo: this.elements.repo?.value || '',
+          branch: this.elements.branch?.value || 'main',
+          gistId: this.elements.gistId?.value || ''
         }
       };
 
-      await this.configService.updateConfig(config);
-      this.toast.success('设置已保存', { duration: 2000 });
+      this.logger.debug('准备保存的配置:', config);
+      await this.configService.saveConfig(config);
+      
+      // 重新加载配置以验证
+      await this.loadConfig();
+      
+      this.toast.success('设置已保存');
     } catch (error) {
       this.logger.error('保存设置失败:', error);
-      this.toast.error('保存设置失败: ' + (error instanceof Error ? error.message : String(error)));
-    }
-  }
-
-  private updateSyncTypeVisibility(): void {
-    const syncTypeSelect = document.getElementById('syncType') as HTMLSelectElement;
-    const repoSettings = document.getElementById('repositorySettings');
-    const gistSettings = document.getElementById('gistSettings');
-
-    if (repoSettings && gistSettings) {
-      repoSettings.style.display = syncTypeSelect?.value === 'repository' ? 'block' : 'none';
-      gistSettings.style.display = syncTypeSelect?.value === 'gist' ? 'block' : 'none';
+      this.toast.error('保存设置失败: ' + (error as Error).message);
     }
   }
 
   private async testConnection(): Promise<void> {
     try {
-      const tokenInput = document.getElementById('token') as HTMLInputElement;
-      const token = tokenInput?.value;
+      const token = this.elements.token?.value;
       if (!token) {
         this.toast.error('请输入GitHub Token');
         return;
       }
 
-      const testButton = document.getElementById('testConnection') as HTMLButtonElement;
-      testButton.disabled = true;
+      if (!this.elements.testBtn) {
+        throw new Error('测试按钮未找到');
+      }
+
+      this.elements.testBtn.disabled = true;
       this.toast.info('正在测试连接...', { duration: 1000 });
 
       await this.githubService.authenticate();
+      
       setTimeout(() => {
         this.toast.success('连接测试成功', { duration: 2000 });
-        testButton.disabled = false;
+        if (this.elements.testBtn) {
+          this.elements.testBtn.disabled = false;
+        }
       }, 1000);
     } catch (error) {
-      const testButton = document.getElementById('testConnection') as HTMLButtonElement;
-      testButton.disabled = false;
+      if (this.elements.testBtn) {
+        this.elements.testBtn.disabled = false;
+      }
       this.logger.error('连接测试失败:', error);
       this.toast.error('连接测试失败: ' + (error instanceof Error ? error.message : String(error)));
     }
-  }
-
-  private initializeEventListeners(): void {
-    // 同步类型切换事件
-    const syncTypeSelect = document.getElementById('syncType');
-    syncTypeSelect?.addEventListener('change', () => this.updateSyncTypeVisibility());
-
-    // 测试连接按钮点击事件
-    const testConnectionButton = document.getElementById('testConnection');
-    testConnectionButton?.addEventListener('click', async (e) => {
-      e.preventDefault();
-      await this.testConnection();
-    });
-
-    // 保存设置表单提交事件
-    const settingsForm = document.getElementById('settingsForm');
-    settingsForm?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await this.saveSettings();
-    });
   }
 }
 

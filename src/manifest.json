@@ -6,7 +6,9 @@
   "permissions": [
     "bookmarks",
     "storage",
-    "identity"
+    "identity",
+    "tabs",
+    "unlimitedStorage"
   ],
   "oauth2": {
     "client_id": "Ov23lihH4oQ0kowMZTTh",
@@ -17,18 +19,19 @@
     "https://api.github.com/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   },
   "background": {
     "service_worker": "background/index.js",
-    "type": "module"
+    "type": "module",
+    "persistent": true
   },
   "action": {
     "default_popup": "popup/index.html"
   },
   "options_ui": {
     "page": "settings/index.html",
-    "open_in_tab": false
+    "open_in_tab": true
   },
   "icons": {
     "16": "assets/icon16.png",

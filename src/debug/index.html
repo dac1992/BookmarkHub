@@ -3,101 +3,168 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>调试页面</title>
+  <title>配置测试</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
+      background: #f5f5f5;
     }
     .container {
-      padding: 20px;
-      max-width: 1200px;
+      max-width: 800px;
       margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
-    .stats-container {
+    .section {
       margin-bottom: 20px;
       padding: 15px;
       border: 1px solid #ddd;
       border-radius: 4px;
     }
-    .log-container {
-      height: 500px;
-      overflow-y: auto;
-      border: 1px solid #ddd;
+    pre {
+      background: #f8f8f8;
       padding: 10px;
-      background: #f5f5f5;
-      font-family: monospace;
-      white-space: pre-wrap;
+      border-radius: 4px;
+      overflow-x: auto;
+    }
+    .config-form {
+      padding: 15px;
+      background: #f8f8f8;
       border-radius: 4px;
     }
-    .log-entry {
-      margin: 5px 0;
-      padding: 5px;
-      border-bottom: 1px solid #eee;
+    .config-item {
+      margin-bottom: 15px;
     }
-    .log-entry.debug { color: #2196F3; }
-    .log-entry.error { color: #F44336; }
-    .log-entry.info { color: #4CAF50; }
-    .controls {
-      margin-bottom: 10px;
+    .config-item label {
+      display: inline-block;
+      width: 120px;
+      margin-right: 10px;
+    }
+    .config-item input[type="text"],
+    .config-item input[type="password"],
+    .config-item input[type="number"],
+    .config-item select {
+      padding: 5px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      width: 250px;
+    }
+    .config-item input[type="checkbox"] {
+      margin-left: 0;
     }
     .button-group {
-      margin-bottom: 10px;
+      margin-top: 15px;
     }
     .button-group button {
       margin-right: 10px;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      background: #4285f4;
+      color: white;
+      cursor: pointer;
     }
-    .stats-title {
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 10px;
-      color: #1a73e8;
+    .button-group button:hover {
+      background: #3367d6;
     }
-    .stats-item {
-      display: flex;
-      justify-content: space-between;
-      padding: 5px 0;
-      border-bottom: 1px solid #eee;
+    .log-container {
+      margin-top: 20px;
+      padding: 10px;
+      border-top: 1px solid #ccc;
     }
-    .stats-item:last-child {
-      border-bottom: none;
+    .log-output {
+      height: 400px;
+      overflow-y: auto;
+      background: #f8f8f8;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
     }
-    .stats-label {
-      color: #5f6368;
-    }
-    .stats-value {
-      font-weight: bold;
-      color: #188038;
+    .log-entry { margin: 2px 0; }
+    .log-entry.debug { color: #666; }
+    .log-entry.info { color: #0066cc; }
+    .log-entry.warn { color: #ff9900; }
+    .log-entry.error { color: #cc0000; }
+    h1 { 
+      margin: 0 0 20px 0;
+      color: #333;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>书签同步调试</h1>
+    <h1>配置测试</h1>
     
-    <div class="controls">
-      <div class="button-group">
-        <button id="clearLogs">清除日志</button>
-        <button id="testBookmarks">测试书签读取</button>
-        <label>
-          <input type="checkbox" id="autoScroll" checked> 自动滚动
-        </label>
-      </div>
-      <div class="button-group">
-        <button id="testGitHubAuth">测试GitHub认证</button>
-        <button id="clearGitHubToken">清除GitHub令牌</button>
-      </div>
+    <div class="section">
+      <h2>当前配置</h2>
+      <pre id="currentConfig">无配置</pre>
     </div>
 
-    <div class="stats-container">
-      <h2>书签统计</h2>
-      <div>总数：<span id="totalCount">0</span></div>
-      <div>文件夹数：<span id="folderCount">0</span></div>
-      <div>书签数：<span id="bookmarkCount">0</span></div>
+    <div class="section">
+      <h2>配置设置</h2>
+      <form id="configForm" class="config-form">
+        <div class="config-item">
+          <label>同步类型</label>
+          <select id="syncType" required>
+            <option value="repository">Repository</option>
+            <option value="gist">Gist</option>
+          </select>
+        </div>
+
+        <div class="config-item">
+          <label>GitHub Token</label>
+          <input type="password" id="githubToken" required>
+        </div>
+
+        <div class="config-item repo-field">
+          <label>仓库所有者</label>
+          <input type="text" id="repoOwner">
+        </div>
+
+        <div class="config-item repo-field">
+          <label>仓库名称</label>
+          <input type="text" id="repoName">
+        </div>
+
+        <div class="config-item repo-field">
+          <label>分支名称</label>
+          <input type="text" id="repoBranch" value="main">
+        </div>
+
+        <div class="config-item gist-field">
+          <label>Gist ID</label>
+          <input type="text" id="gistId">
+        </div>
+
+        <div class="config-item">
+          <label>同步间隔(分钟)</label>
+          <input type="number" id="syncInterval" value="60" min="1">
+        </div>
+
+        <div class="config-item">
+          <label>
+            <input type="checkbox" id="autoSync">
+            启用自动同步
+          </label>
+        </div>
+
+        <div class="button-group">
+          <button type="submit">保存设置</button>
+        </div>
+      </form>
     </div>
 
-    <h2>调试日志</h2>
-    <div class="log-container" id="logContainer"></div>
+    <div class="section">
+      <h2>日志输出</h2>
+      <div id="logContainer" class="log-output"></div>
+    </div>
   </div>
   <script src="index.js"></script>
 </body>

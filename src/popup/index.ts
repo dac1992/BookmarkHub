@@ -216,22 +216,29 @@ export class PopupPage {
 
   private async saveSettings(): Promise<void> {
     try {
-      const config: Partial<SyncConfig> = {
+      // 获取当前配置以保留 deviceId
+      const currentConfig = await this.configService.getConfig();
+      
+      const config: SyncConfig = {
         syncType: this.elements.syncType?.value === 'repository' ? 'repo' : 'gist',
-        autoSync: this.elements.autoSync?.checked || false,
-        syncInterval: Number(this.elements.syncInterval?.value) || 300000,
+        autoSync: this.elements.autoSync?.checked ?? false,
+        syncInterval: parseInt(this.elements.syncInterval?.value || '60', 10),
         gitConfig: {
           token: this.elements.token?.value || '',
-          owner: this.elements.owner?.value || undefined,
-          repo: this.elements.repo?.value || undefined,
+          owner: this.elements.owner?.value || '',
+          repo: this.elements.repo?.value || '',
           branch: this.elements.branch?.value || 'main',
-          gistId: this.elements.gistId?.value || undefined
-        }
+          gistId: this.elements.gistId?.value || ''
+        },
+        deviceId: currentConfig.deviceId || `device_${Date.now()}`
       };
 
-      await this.configService.updateConfig(config);
+      await this.configService.saveConfig(config);
       this.toast.success('设置已保存');
       this.togglePanel(); // 返回同步面板
+      
+      // 重新加载配置以确保显示最新状态
+      await this.loadSettings();
     } catch (error) {
       this.logger.error('保存设置失败:', error);
       this.toast.error('保存设置失败: ' + (error instanceof Error ? error.message : String(error)));

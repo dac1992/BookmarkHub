@@ -543,20 +543,15 @@ export class GitHubService {
 
   public async getToken(): Promise<GitHubToken | null> {
     try {
-      const result = await chrome.storage.local.get(['github_token', 'token_timestamp']);
-      if (!result.github_token) {
+      const config = await this.configService.getConfig();
+      if (!config.gitConfig.token) {
         return null;
       }
-      
-      // 检查token是否过期（默认24小时）
-      const tokenAge = Date.now() - (result.token_timestamp || 0);
-      if (tokenAge > 24 * 60 * 60 * 1000) {
-        this.logger.info('Token已过期');
-        await this.clearToken();
-        return null;
-      }
-      
-      return result.github_token;
+      return {
+        accessToken: config.gitConfig.token,
+        tokenType: 'bearer',
+        scope: 'repo,gist'
+      };
     } catch (error) {
       this.logger.error('获取GitHub令牌失败:', error);
       return null;
@@ -565,7 +560,11 @@ export class GitHubService {
 
   public async clearToken(): Promise<void> {
     try {
-      await chrome.storage.local.remove(['github_token', 'token_timestamp']);
+      await this.configService.updateConfig({
+        gitConfig: {
+          token: ''
+        }
+      });
       this.logger.info('GitHub令牌已清除');
     } catch (error) {
       this.logger.error('清除GitHub令牌失败:', error);

@@ -4,13 +4,13 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 
 module.exports = {
-  mode: 'development',
+  mode: process.env.NODE_ENV === 'production' ? 'production' : 'development',
   devtool: 'source-map',
   entry: {
     'popup/index': './src/popup/index.ts',
     'settings/index': './src/popup/settings.ts',
     'background/index': './src/background/index.ts',
-    'debug/index': './src/debug/index.ts'
+    'debug/index': './src/debug/index.js'
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -25,7 +25,7 @@ module.exports = {
           {
             loader: 'ts-loader',
             options: {
-              transpileOnly: false,
+              transpileOnly: true,
               compilerOptions: {
                 sourceMap: true
               }
@@ -35,16 +35,30 @@ module.exports = {
         exclude: /node_modules/
       },
       {
-        test: /\.css$/,
+        test: /\.js$/,
         use: [
           {
-            loader: MiniCssExtractPlugin.loader,
+            loader: 'babel-loader',
             options: {
-              publicPath: '../'
+              presets: ['@babel/preset-env']
             }
-          },
+          }
+        ],
+        exclude: /node_modules/
+      },
+      {
+        test: /\.css$/,
+        use: [
+          MiniCssExtractPlugin.loader,
           'css-loader'
         ]
+      },
+      {
+        test: /\.(png|jpg|gif|svg)$/,
+        type: 'asset/resource',
+        generator: {
+          filename: 'assets/[name][ext]'
+        }
       }
     ]
   },
@@ -57,37 +71,55 @@ module.exports = {
       filename: 'popup/index.html',
       chunks: ['popup/index'],
       inject: 'body',
-      scriptLoading: 'defer',
-      minify: false
+      scriptLoading: 'defer'
     }),
     new HtmlWebpackPlugin({
       template: './src/popup/settings.html',
       filename: 'settings/index.html',
       chunks: ['settings/index'],
       inject: 'body',
-      scriptLoading: 'defer',
-      minify: false
+      scriptLoading: 'defer'
     }),
     new HtmlWebpackPlugin({
       template: './src/debug/index.html',
       filename: 'debug/index.html',
       chunks: ['debug/index'],
       inject: 'body',
-      scriptLoading: 'defer',
-      minify: false
+      scriptLoading: 'defer'
     }),
     new MiniCssExtractPlugin({
       filename: '[name].css'
     }),
     new CopyWebpackPlugin({
       patterns: [
-        { from: 'src/manifest.json' },
-        { from: 'src/assets', to: 'assets' }
+        { 
+          from: 'src/manifest.json',
+          transform(content) {
+            return Buffer.from(JSON.stringify({
+              ...JSON.parse(content.toString()),
+              version: process.env.npm_package_version || '1.0.0'
+            }, null, 2))
+          }
+        },
+        { 
+          from: 'src/assets/*.{png,jpg,gif,svg}',
+          to: 'assets/[name][ext]'
+        }
       ]
     })
   ],
   optimization: {
-    minimize: false,
+    minimize: process.env.NODE_ENV === 'production',
     splitChunks: false
+  },
+  performance: {
+    hints: false
+  },
+  stats: {
+    logging: 'verbose',
+    colors: true,
+    modules: true,
+    reasons: true,
+    errorDetails: true
   }
 }; 
