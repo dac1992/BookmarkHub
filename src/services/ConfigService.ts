@@ -41,6 +41,21 @@ export class ConfigService {
 
   private constructor() {
     this.logger = Logger.getInstance();
+    // 监听storage变化
+    chrome.storage.onChanged.addListener(this.handleStorageChange.bind(this));
+  }
+
+  private handleStorageChange(changes: { [key: string]: chrome.storage.StorageChange }, areaName: string): void {
+    if (areaName === 'local' && changes[ConfigService.STORAGE_KEY]) {
+      const { newValue } = changes[ConfigService.STORAGE_KEY];
+      if (newValue) {
+        // 更新内存中的配置
+        this.config = this.normalizeConfig(newValue);
+      } else {
+        // 配置被清除
+        this.config = null;
+      }
+    }
   }
 
   public static getInstance(): ConfigService {
@@ -95,23 +110,16 @@ export class ConfigService {
         this.logger.warn('配置验证警告:', errors);
       }
 
-      // 添加元数据
-      const fullConfig = {
-        ...mergedConfig,
-        _version: ConfigService.CONFIG_VERSION,
-        _timestamp: now
-      };
-
-      // 保存到 local storage
+      // 保存到 local storage，不再添加元数据
       await new Promise<void>((resolve, reject) => {
-        chrome.storage.local.set({ [ConfigService.STORAGE_KEY]: fullConfig }, () => {
+        chrome.storage.local.set({ [ConfigService.STORAGE_KEY]: mergedConfig }, () => {
           if (chrome.runtime.lastError) {
             reject(new Error(`配置保存失败: ${chrome.runtime.lastError.message}`));
             return;
           }
           // 更新内存中的配置
           this.config = mergedConfig;
-          this.logger.debug('配置保存成功:', fullConfig);
+          this.logger.debug('配置保存成功:', mergedConfig);
           resolve();
         });
       });
@@ -182,6 +190,10 @@ export class ConfigService {
     if (!normalized.deviceId) {
       normalized.deviceId = this.generateDeviceId();
     }
+
+    // 移除不必要的字段
+    delete (normalized as any)._version;
+    delete (normalized as any)._timestamp;
 
     return normalized;
   }

@@ -6,6 +6,8 @@ class DebugPage {
     this.configService = ConfigService.getInstance();
     this.logger = Logger.getInstance();
     this.loggedMessages = new Set();
+    this.logHistory = [];
+    this.maxLogHistory = 100; // 最多保存100条日志
     this.initElements();
     this.bindEvents();
     this.loadConfig().catch(error => {
@@ -40,9 +42,9 @@ class DebugPage {
         if (newValue && JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
           this.log('配置已更新');
           if (oldValue) {
-            this.log('旧配置: ' + JSON.stringify(oldValue, null, 2));
+            this.log('旧配置: ' + JSON.stringify(this.sanitizeConfig(oldValue), null, 2));
           }
-          this.log('新配置: ' + JSON.stringify(newValue, null, 2));
+          this.log('新配置: ' + JSON.stringify(this.sanitizeConfig(newValue), null, 2));
           this.updateDisplay(newValue);
         }
       }
@@ -55,7 +57,7 @@ class DebugPage {
       try {
         const config = this.getFormConfig();
         this.log('正在保存配置...');
-        this.log('配置内容: ' + JSON.stringify(config, null, 2));
+        this.log('配置内容: ' + JSON.stringify(this.sanitizeConfig(config), null, 2));
 
         await this.configService.saveConfig(config);
         this.log('配置已保存');
@@ -80,6 +82,14 @@ class DebugPage {
     this.elements.syncInterval?.addEventListener('input', (e) => {
       e.target.value = e.target.value.replace(/[^0-9]/g, '');
     });
+
+    // 页面关闭前保存日志
+    window.addEventListener('beforeunload', () => {
+      this.saveLogHistory();
+    });
+
+    // 页面加载时恢复日志
+    this.loadLogHistory();
   }
 
   getFormConfig() {
@@ -99,6 +109,22 @@ class DebugPage {
     return config;
   }
 
+  sanitizeConfig(config) {
+    // 创建配置的深拷贝
+    const sanitized = JSON.parse(JSON.stringify(config));
+    
+    // 移除不必要的字段
+    delete sanitized._version;
+    delete sanitized._timestamp;
+    
+    // 如果有token，替换为占位符
+    if (sanitized.gitConfig?.token) {
+      sanitized.gitConfig.token = '********';
+    }
+    
+    return sanitized;
+  }
+
   log(message, type = 'info') {
     if (!this.elements.logContainer) return;
     
@@ -116,6 +142,18 @@ class DebugPage {
     this.elements.logContainer.appendChild(entry);
     this.elements.logContainer.scrollTop = this.elements.logContainer.scrollHeight;
     
+    // 保存到日志历史
+    this.logHistory.push({
+      time,
+      message,
+      type
+    });
+    
+    // 限制日志历史大小
+    if (this.logHistory.length > this.maxLogHistory) {
+      this.logHistory.shift();
+    }
+    
     // 同时输出到控制台
     console.log(`[${type}] ${message}`);
     
@@ -125,12 +163,38 @@ class DebugPage {
     }, 300000);
   }
 
+  saveLogHistory() {
+    try {
+      localStorage.setItem('debug_log_history', JSON.stringify(this.logHistory));
+    } catch (error) {
+      console.error('保存日志历史失败:', error);
+    }
+  }
+
+  loadLogHistory() {
+    try {
+      const savedHistory = localStorage.getItem('debug_log_history');
+      if (savedHistory) {
+        const history = JSON.parse(savedHistory);
+        history.forEach(entry => {
+          const logEntry = document.createElement('div');
+          logEntry.className = `log-entry ${entry.type}`;
+          logEntry.textContent = `[${entry.time}] ${entry.message}`;
+          this.elements.logContainer?.appendChild(logEntry);
+        });
+        this.logHistory = history;
+      }
+    } catch (error) {
+      console.error('加载日志历史失败:', error);
+    }
+  }
+
   updateDisplay(config) {
     if (!config) return;
 
     // 更新配置显示
     if (this.elements.currentConfig) {
-      this.elements.currentConfig.textContent = JSON.stringify(config, null, 2);
+      this.elements.currentConfig.textContent = JSON.stringify(this.sanitizeConfig(config), null, 2);
     }
 
     // 更新表单
@@ -168,7 +232,7 @@ class DebugPage {
       
       if (config) {
         this.log('已加载配置');
-        this.log('配置内容: ' + JSON.stringify(config, null, 2));
+        this.log('配置内容: ' + JSON.stringify(this.sanitizeConfig(config), null, 2));
         this.updateDisplay(config);
       } else {
         this.log('未找到已保存的配置');
