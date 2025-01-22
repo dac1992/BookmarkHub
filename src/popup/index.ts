@@ -79,9 +79,22 @@ export class PopupPage {
       gistSettings: null
     };
 
-    this.initializeElements();
-    this.initializeEventListeners();
-    this.loadInitialState();
+    // 确保DOM加载完成后再初始化
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        this.initializeElements();
+        this.initializeEventListeners();
+        this.loadInitialState().catch(error => {
+          this.logger.error('初始化加载失败:', error);
+        });
+      });
+    } else {
+      this.initializeElements();
+      this.initializeEventListeners();
+      this.loadInitialState().catch(error => {
+        this.logger.error('初始化加载失败:', error);
+      });
+    }
   }
 
   private initializeElements(): void {
@@ -138,6 +151,9 @@ export class PopupPage {
 
   private async loadInitialState(): Promise<void> {
     try {
+      // 加载配置
+      await this.loadSettings();
+
       // 加载书签数量
       const bookmarks = await this.bookmarkService.getAllBookmarks();
       this.updateBookmarkCount(bookmarks.length);
@@ -171,7 +187,9 @@ export class PopupPage {
 
   private async loadSettings(): Promise<void> {
     try {
+      this.logger.debug('开始加载配置...');
       const config = await this.configService.getConfig();
+      this.logger.debug('获取到配置:', config);
       
       // 填充表单
       if (this.elements.syncType) this.elements.syncType.value = config.syncType === 'repo' ? 'repository' : 'gist';
@@ -184,6 +202,7 @@ export class PopupPage {
       if (this.elements.syncInterval) this.elements.syncInterval.value = String(config.syncInterval);
 
       this.updateSyncTypeVisibility();
+      this.logger.debug('配置加载完成');
     } catch (error) {
       this.logger.error('加载设置失败:', error);
       this.toast.error('加载设置失败');

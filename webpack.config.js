@@ -8,7 +8,6 @@ module.exports = {
   devtool: 'source-map',
   entry: {
     'popup/index': './src/popup/index.ts',
-    'settings/index': './src/popup/settings.ts',
     'background/index': './src/background/index.ts',
     'debug/index': './src/debug/index.js'
   },
@@ -70,13 +69,6 @@ module.exports = {
       template: './src/popup/index.html',
       filename: 'popup/index.html',
       chunks: ['popup/index'],
-      inject: 'body',
-      scriptLoading: 'defer'
-    }),
-    new HtmlWebpackPlugin({
-      template: './src/popup/settings.html',
-      filename: 'settings/index.html',
-      chunks: ['settings/index'],
       inject: 'body',
       scriptLoading: 'defer'
     }),

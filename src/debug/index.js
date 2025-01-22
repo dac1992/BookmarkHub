@@ -8,6 +8,8 @@ class DebugPage {
     this.loggedMessages = new Set();
     this.logHistory = [];
     this.maxLogHistory = 100; // 最多保存100条日志
+    this.lastConfigUpdate = 0;
+    this.CONFIG_UPDATE_DEBOUNCE = 1000; // 1秒内的配置更新会被合并
     this.initElements();
     this.bindEvents();
     this.loadConfig().catch(error => {
@@ -40,6 +42,13 @@ class DebugPage {
       if (areaName === 'local' && changes[ConfigService.STORAGE_KEY]) {
         const { newValue, oldValue } = changes[ConfigService.STORAGE_KEY];
         if (newValue && JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
+          // 防止短时间内重复更新
+          const now = Date.now();
+          if (now - this.lastConfigUpdate < this.CONFIG_UPDATE_DEBOUNCE) {
+            return;
+          }
+          this.lastConfigUpdate = now;
+
           this.log('配置已更新');
           if (oldValue) {
             this.log('旧配置: ' + JSON.stringify(this.sanitizeConfig(oldValue), null, 2));
@@ -110,6 +119,7 @@ class DebugPage {
   }
 
   sanitizeConfig(config) {
+    if (!config) return {};
     // 创建配置的深拷贝
     const sanitized = JSON.parse(JSON.stringify(config));
     

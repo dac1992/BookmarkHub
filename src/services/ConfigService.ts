@@ -38,24 +38,46 @@ export class ConfigService {
   private config: SyncConfig | null = null;
   private lastSaveTimestamp: number = 0;
   private readonly SAVE_DEBOUNCE_TIME = 1000; // 1秒内的保存请求会被合并
+  private storageChangeHandler: ((changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => void) | null = null;
 
   private constructor() {
     this.logger = Logger.getInstance();
-    // 监听storage变化
-    chrome.storage.onChanged.addListener(this.handleStorageChange.bind(this));
+    this.initStorageListener();
   }
 
-  private handleStorageChange(changes: { [key: string]: chrome.storage.StorageChange }, areaName: string): void {
-    if (areaName === 'local' && changes[ConfigService.STORAGE_KEY]) {
-      const { newValue } = changes[ConfigService.STORAGE_KEY];
-      if (newValue) {
-        // 更新内存中的配置
-        this.config = this.normalizeConfig(newValue);
-      } else {
-        // 配置被清除
-        this.config = null;
-      }
+  private initStorageListener(): void {
+    // 移除旧的监听器
+    if (this.storageChangeHandler) {
+      chrome.storage.onChanged.removeListener(this.storageChangeHandler);
     }
+
+    // 创建新的监听器
+    this.storageChangeHandler = (changes, areaName) => {
+      if (areaName === 'local' && changes[ConfigService.STORAGE_KEY]) {
+        const { newValue } = changes[ConfigService.STORAGE_KEY];
+        if (newValue) {
+          // 更新内存中的配置
+          this.config = this.normalizeConfig(newValue);
+          this.logger.debug('配置已更新(从storage):', this.sanitizeConfig(this.config));
+        } else {
+          // 配置被清除
+          this.config = null;
+          this.logger.debug('配置已清除(从storage)');
+        }
+      }
+    };
+
+    // 添加新的监听器
+    chrome.storage.onChanged.addListener(this.storageChangeHandler);
+  }
+
+  private sanitizeConfig(config: Partial<SyncConfig> | SyncConfig): any {
+    if (!config) return {};
+    const sanitized = JSON.parse(JSON.stringify(config));
+    if (sanitized.gitConfig?.token) {
+      sanitized.gitConfig.token = '********';
+    }
+    return sanitized;
   }
 
   public static getInstance(): ConfigService {
@@ -89,7 +111,7 @@ export class ConfigService {
       this.lastSaveTimestamp = now;
 
       await this.ensureStoragePermission();
-      this.logger.debug('开始保存配置...', config);
+      this.logger.debug('开始保存配置...', this.sanitizeConfig(config));
       
       // 获取当前配置
       const currentConfig = await this.getConfig();
@@ -110,7 +132,7 @@ export class ConfigService {
         this.logger.warn('配置验证警告:', errors);
       }
 
-      // 保存到 local storage，不再添加元数据
+      // 保存到 local storage
       await new Promise<void>((resolve, reject) => {
         chrome.storage.local.set({ [ConfigService.STORAGE_KEY]: mergedConfig }, () => {
           if (chrome.runtime.lastError) {
@@ -119,7 +141,7 @@ export class ConfigService {
           }
           // 更新内存中的配置
           this.config = mergedConfig;
-          this.logger.debug('配置保存成功:', mergedConfig);
+          this.logger.debug('配置保存成功:', this.sanitizeConfig(mergedConfig));
           resolve();
         });
       });
@@ -158,6 +180,7 @@ export class ConfigService {
         const normalizedConfig = this.normalizeConfig(savedConfig);
         // 更新内存中的配置
         this.config = normalizedConfig;
+        this.logger.debug('加载的配置:', this.sanitizeConfig(normalizedConfig));
         return { ...normalizedConfig };
       }
 
