@@ -113,21 +113,57 @@ export class BookmarkService {
   }
 
   public async getAllBookmarks(): Promise<BookmarkNode[]> {
-    const treeNodes = await chrome.bookmarks.getTree();
-    return this.convertToBookmarkNodes(treeNodes);
+    try {
+      const treeNodes = await chrome.bookmarks.getTree();
+      const bookmarks = this.convertToBookmarkNodes(treeNodes);
+      return bookmarks;
+    } catch (error) {
+      this.logger.error('获取书签失败:', error);
+      throw error;
+    }
   }
 
   private convertToBookmarkNodes(treeNodes: chrome.bookmarks.BookmarkTreeNode[]): BookmarkNode[] {
-    const convert = (node: chrome.bookmarks.BookmarkTreeNode, index: number): BookmarkNode => {
-      return {
-        ...node,
-        dateAdded: node.dateAdded || Date.now(),
-        index,
-        children: node.children?.map((child, idx) => convert(child, idx))
-      };
-    };
+    const allNodes: BookmarkNode[] = [];
     
-    return treeNodes.map((node, index) => convert(node, index));
+    const convert = (node: chrome.bookmarks.BookmarkTreeNode): BookmarkNode | null => {
+      // 跳过根节点
+      if (node.id === '0') {
+        if (node.children) {
+          return node.children.map(child => convert(child))
+            .filter((n): n is BookmarkNode => n !== null)[0];
+        }
+        return null;
+      }
+
+      const convertedNode: BookmarkNode = {
+        id: node.id,
+        parentId: node.parentId || '',
+        title: node.title,
+        url: node.url || '',
+        dateAdded: node.dateAdded || Date.now(),
+        index: node.index || 0,
+        children: []
+      };
+
+      if (node.children) {
+        convertedNode.children = node.children
+          .map(child => convert(child))
+          .filter((n): n is BookmarkNode => n !== null);
+      }
+
+      // 只有非根节点才添加到结果中
+      if (node.id !== '0') {
+        allNodes.push(convertedNode);
+      }
+
+      return convertedNode;
+    };
+
+    // 处理根节点
+    treeNodes.forEach(node => convert(node));
+    
+    return allNodes;
   }
 
   public async updateAllBookmarks(bookmarks: BookmarkNode[]): Promise<void> {
@@ -218,12 +254,17 @@ export class BookmarkService {
     const result: BookmarkNode[] = [];
     
     const processNode = (node: chrome.bookmarks.BookmarkTreeNode): BookmarkNode | undefined => {
-      // 跳过根节点
+      // 跳过根节点，但处理其子节点
       if (node.id === '0') {
         if (node.children) {
-          node.children.forEach(child => processNode(child));
+          node.children.forEach(child => {
+            const processed = processNode(child);
+            if (processed) {
+              result.push(processed);
+            }
+          });
         }
-        return;
+        return undefined;
       }
 
       // 创建新的节点对象
@@ -244,11 +285,21 @@ export class BookmarkService {
           .filter((child): child is BookmarkNode => child !== undefined);
       }
 
-      result.push(normalizedNode);
       return normalizedNode;
     };
 
-    nodes.forEach(node => processNode(node));
+    // 处理根节点
+    nodes.forEach(node => {
+      processNode(node);
+    });
+
+    // 添加调试日志
+    this.logger.debug('书签统计:', {
+      总数: result.length,
+      文件夹数: result.filter(node => !node.url).length,
+      书签数: result.filter(node => node.url).length
+    });
+
     return result;
   }
 

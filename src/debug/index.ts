@@ -1,5 +1,6 @@
 import { BookmarkService } from '../services/BookmarkService';
 import { GitHubService } from '../services/GitHubService';
+import { ConfigService } from '../services/ConfigService';
 import { Logger } from '../utils/logger';
 
 class DebugPage {
@@ -12,6 +13,7 @@ class DebugPage {
   private clearGitHubTokenButton: HTMLButtonElement;
   private bookmarkService: BookmarkService;
   private githubService: GitHubService;
+  private configService: ConfigService;
   private logger: Logger;
   private static initialized: boolean = false;
   private static consoleOverridden: boolean = false;
@@ -26,6 +28,7 @@ class DebugPage {
     
     this.bookmarkService = BookmarkService.getInstance();
     this.githubService = GitHubService.getInstance();
+    this.configService = ConfigService.getInstance();
     this.logger = Logger.getInstance();
 
     if (!DebugPage.initialized) {
@@ -89,7 +92,15 @@ class DebugPage {
     this.clearGitHubTokenButton.addEventListener('click', async () => {
       this.log('info', '开始清除GitHub令牌');
       try {
-        await this.githubService.clearToken();
+        await this.configService.updateConfig({
+          gitConfig: {
+            token: '',
+            owner: '',
+            repo: '',
+            branch: '',
+            gistId: ''
+          }
+        });
         this.log('info', 'GitHub令牌已清除');
       } catch (error) {
         this.log('error', '清除GitHub令牌失败:', error);
@@ -157,6 +168,57 @@ class DebugPage {
       output.textContent = `${new Date().toISOString()} ${message}\n${output.textContent}`;
     }
     this.logger.debug(args.join(' '));
+  }
+
+  private updateStats(stats: { 总数: number; 文件夹数: number; 书签数: number }): void {
+    const totalCount = document.getElementById('totalCount');
+    const folderCount = document.getElementById('folderCount');
+    const bookmarkCount = document.getElementById('bookmarkCount');
+
+    if (totalCount) totalCount.textContent = String(stats.总数);
+    if (folderCount) folderCount.textContent = String(stats.文件夹数);
+    if (bookmarkCount) bookmarkCount.textContent = String(stats.书签数);
+  }
+
+  private async testBookmarks(): Promise<void> {
+    try {
+      const bookmarks = await this.bookmarkService.getAllBookmarks();
+      const stats = {
+        总数: bookmarks.length,
+        文件夹数: bookmarks.filter(node => !node.url).length,
+        书签数: bookmarks.filter(node => node.url).length
+      };
+      this.updateStats(stats);
+      this.logger.info('获取书签成功', stats);
+    } catch (error) {
+      this.logger.error('获取书签失败:', error);
+    }
+  }
+
+  private async testGitHubAuth(): Promise<void> {
+    try {
+      await this.githubService.authenticate();
+      this.logger.info('GitHub认证成功');
+    } catch (error) {
+      this.logger.error('GitHub认证失败:', error);
+    }
+  }
+
+  private async clearGitHubToken(): Promise<void> {
+    try {
+      await this.configService.updateConfig({
+        gitConfig: {
+          token: '',
+          owner: '',
+          repo: '',
+          branch: '',
+          gistId: ''
+        }
+      });
+      this.logger.info('GitHub令牌已清除');
+    } catch (error) {
+      this.logger.error('清除GitHub令牌失败:', error);
+    }
   }
 }
 

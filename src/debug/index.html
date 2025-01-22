@@ -9,21 +9,35 @@
       font-family: Arial, sans-serif;
       margin: 20px;
     }
+    .container {
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .stats-container {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
     .log-container {
-      border: 1px solid #ccc;
-      padding: 10px;
-      margin-bottom: 10px;
-      max-height: 400px;
+      height: 500px;
       overflow-y: auto;
+      border: 1px solid #ddd;
+      padding: 10px;
+      background: #f5f5f5;
+      font-family: monospace;
+      white-space: pre-wrap;
+      border-radius: 4px;
     }
     .log-entry {
       margin: 5px 0;
       padding: 5px;
       border-bottom: 1px solid #eee;
     }
-    .log-entry.info { color: #1a73e8; }
-    .log-entry.error { color: #d93025; }
-    .log-entry.debug { color: #188038; }
+    .log-entry.debug { color: #2196F3; }
+    .log-entry.error { color: #F44336; }
+    .log-entry.info { color: #4CAF50; }
     .controls {
       margin-bottom: 10px;
     }
@@ -33,23 +47,58 @@
     .button-group button {
       margin-right: 10px;
     }
+    .stats-title {
+      font-size: 16px;
+      font-weight: bold;
+      margin-bottom: 10px;
+      color: #1a73e8;
+    }
+    .stats-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .stats-item:last-child {
+      border-bottom: none;
+    }
+    .stats-label {
+      color: #5f6368;
+    }
+    .stats-value {
+      font-weight: bold;
+      color: #188038;
+    }
   </style>
 </head>
 <body>
-  <div class="controls">
-    <div class="button-group">
-      <button id="clearLogs">清除日志</button>
-      <button id="testBookmarks">测试书签读取</button>
-      <label>
-        <input type="checkbox" id="autoScroll" checked> 自动滚动
-      </label>
+  <div class="container">
+    <h1>书签同步调试</h1>
+    
+    <div class="controls">
+      <div class="button-group">
+        <button id="clearLogs">清除日志</button>
+        <button id="testBookmarks">测试书签读取</button>
+        <label>
+          <input type="checkbox" id="autoScroll" checked> 自动滚动
+        </label>
+      </div>
+      <div class="button-group">
+        <button id="testGitHubAuth">测试GitHub认证</button>
+        <button id="clearGitHubToken">清除GitHub令牌</button>
+      </div>
     </div>
-    <div class="button-group">
-      <button id="testGitHubAuth">测试GitHub认证</button>
-      <button id="clearGitHubToken">清除GitHub令牌</button>
+
+    <div class="stats-container">
+      <h2>书签统计</h2>
+      <div>总数：<span id="totalCount">0</span></div>
+      <div>文件夹数：<span id="folderCount">0</span></div>
+      <div>书签数：<span id="bookmarkCount">0</span></div>
     </div>
+
+    <h2>调试日志</h2>
+    <div class="log-container" id="logContainer"></div>
   </div>
-  <div id="logContainer" class="log-container"></div>
   <script src="index.js"></script>
 </body>
 </html> 
