@@ -75,7 +75,7 @@ export class SettingsPage {
       };
 
       await this.configService.updateConfig(config);
-      this.toast.success('设置已保存');
+      this.toast.success('设置已保存', { duration: 2000 });
     } catch (error) {
       this.logger.error('保存设置失败:', error);
       this.toast.error('保存设置失败: ' + (error instanceof Error ? error.message : String(error)));
@@ -102,10 +102,18 @@ export class SettingsPage {
         return;
       }
 
-      this.toast.info('正在测试连接...');
+      const testButton = document.getElementById('testConnection') as HTMLButtonElement;
+      testButton.disabled = true;
+      this.toast.info('正在测试连接...', { duration: 1000 });
+
       await this.githubService.authenticate();
-      this.toast.success('连接测试成功');
+      setTimeout(() => {
+        this.toast.success('连接测试成功', { duration: 2000 });
+        testButton.disabled = false;
+      }, 1000);
     } catch (error) {
+      const testButton = document.getElementById('testConnection') as HTMLButtonElement;
+      testButton.disabled = false;
       this.logger.error('连接测试失败:', error);
       this.toast.error('连接测试失败: ' + (error instanceof Error ? error.message : String(error)));
     }
@@ -118,11 +126,17 @@ export class SettingsPage {
 
     // 测试连接按钮点击事件
     const testConnectionButton = document.getElementById('testConnection');
-    testConnectionButton?.addEventListener('click', () => this.testConnection());
+    testConnectionButton?.addEventListener('click', async (e) => {
+      e.preventDefault();
+      await this.testConnection();
+    });
 
-    // 保存设置按钮点击事件
-    const saveSettingsButton = document.getElementById('saveSettings');
-    saveSettingsButton?.addEventListener('click', () => this.saveSettings());
+    // 保存设置表单提交事件
+    const settingsForm = document.getElementById('settingsForm');
+    settingsForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await this.saveSettings();
+    });
   }
 }
 

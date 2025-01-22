@@ -34,13 +34,37 @@ export enum BookmarkOperationType {
 /**
  * 书签变更记录
  */
-export interface BookmarkChange {
-  type: 'create' | 'remove' | 'move' | 'update';
-  id: string;
-  bookmark: chrome.bookmarks.BookmarkTreeNode;
-  oldParentId?: string;
-  oldIndex?: number;
-}
+export type BookmarkChange =
+  | {
+      type: 'create';
+      id: string;
+      title: string;
+      url?: string;
+      parentId: string;
+      index: number;
+    }
+  | {
+      type: 'update';
+      id: string;
+      title?: string;
+      url?: string;
+    }
+  | {
+      type: 'remove';
+      id: string;
+      parentId: string;
+      index: number;
+      title: string;
+      url?: string;
+    }
+  | {
+      type: 'move';
+      id: string;
+      oldParentId: string;
+      oldIndex: number;
+      newParentId: string;
+      newIndex: number;
+    };
 
 /**
  * 进度事件类型

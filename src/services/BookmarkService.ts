@@ -34,12 +34,12 @@ export class BookmarkService {
     // 监听创建事件
     chrome.bookmarks.onCreated.addListener((id, bookmark) => {
       const change: BookmarkChange = {
-        type: 'created',
+        type: 'create',
         id,
-        title: bookmark.title,
+        title: bookmark.title || '',
         url: bookmark.url,
-        parentId: bookmark.parentId,
-        index: bookmark.index
+        parentId: bookmark.parentId || '0',
+        index: bookmark.index || 0
       };
       this.notifyChange(change);
     });
@@ -47,7 +47,7 @@ export class BookmarkService {
     // 监听更新事件
     chrome.bookmarks.onChanged.addListener((id, changeInfo) => {
       const change: BookmarkChange = {
-        type: 'changed',
+        type: 'update',
         id,
         title: changeInfo.title,
         url: changeInfo.url
@@ -58,10 +58,12 @@ export class BookmarkService {
     // 监听删除事件
     chrome.bookmarks.onRemoved.addListener((id, removeInfo) => {
       const change: BookmarkChange = {
-        type: 'removed',
+        type: 'remove',
         id,
-        parentId: removeInfo.parentId,
-        index: removeInfo.index
+        parentId: removeInfo.parentId || '0',
+        index: removeInfo.index || 0,
+        title: '',  // 删除时可能无法获取原标题
+        url: undefined
       };
       this.notifyChange(change);
     });
@@ -288,43 +290,45 @@ export class BookmarkService {
   }
 
   private handleBookmarkCreated(id: string, bookmark: chrome.bookmarks.BookmarkTreeNode): BookmarkChange {
-    return {
-      type: 'created',
-      id,
-      title: bookmark.title,
-      url: bookmark.url,
-      parentId: bookmark.parentId,
-      index: bookmark.index
-    };
+      return {
+          type: 'create',
+          id,
+          title: bookmark.title,
+          url: bookmark.url || '',
+          parentId: bookmark.parentId || '0',
+          index: bookmark.index || 0
+      };
   }
 
   private handleBookmarkChanged(id: string, changeInfo: chrome.bookmarks.BookmarkChangeInfo): BookmarkChange {
-    return {
-      type: 'changed',
-      id,
-      title: changeInfo.title,
-      url: changeInfo.url
-    };
+      return {
+          type: 'update',
+          id,
+          title: changeInfo.title || '',
+          url: changeInfo.url || ''
+      };
   }
 
   private handleBookmarkRemoved(id: string, removeInfo: chrome.bookmarks.BookmarkRemoveInfo): BookmarkChange {
-    return {
-      type: 'removed',
-      id,
-      parentId: removeInfo.parentId,
-      index: removeInfo.index,
-      title: removeInfo.node.title,
-      url: removeInfo.node.url
-    };
+      return {
+          type: 'remove',
+          id,
+          parentId: removeInfo.parentId || '0',
+          index: removeInfo.index || 0,
+          title: '',  // 删除时可能无法获取原标题
+          url: undefined
+      };
   }
 
   private handleBookmarkMoved(id: string, moveInfo: chrome.bookmarks.BookmarkMoveInfo): BookmarkChange {
-    return {
-      type: 'changed',
-      id,
-      parentId: moveInfo.parentId,
-      index: moveInfo.index
-    };
+      return {
+          type: 'move',
+          id,
+          oldParentId: moveInfo.oldParentId || '0',
+          oldIndex: moveInfo.oldIndex || 0,
+          newParentId: moveInfo.parentId || '0',
+          newIndex: moveInfo.index || 0
+      };
   }
 }
 
