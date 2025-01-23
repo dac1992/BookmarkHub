@@ -5,11 +5,9 @@ class DebugPage {
   constructor() {
     this.configService = ConfigService.getInstance();
     this.logger = Logger.getInstance();
-    this.loggedMessages = new Set();
     this.logHistory = [];
     this.maxLogHistory = 100; // 最多保存100条日志
-    this.lastConfigUpdate = 0;
-    this.CONFIG_UPDATE_DEBOUNCE = 1000; // 1秒内的配置更新会被合并
+    this.loggedConfigUpdates = new Set(); // 用于跟踪已记录的配置更新
     this.initElements();
     this.bindEvents();
     this.loadConfig().catch(error => {
@@ -37,44 +35,59 @@ class DebugPage {
   }
 
   bindEvents() {
-    // 监听配置变化
-    chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName === 'local' && changes[ConfigService.STORAGE_KEY]) {
-        const { newValue, oldValue } = changes[ConfigService.STORAGE_KEY];
-        if (newValue && JSON.stringify(newValue) !== JSON.stringify(oldValue)) {
-          // 防止短时间内重复更新
-          const now = Date.now();
-          if (now - this.lastConfigUpdate < this.CONFIG_UPDATE_DEBOUNCE) {
-            return;
-          }
-          this.lastConfigUpdate = now;
-
+    // 监听配置更新消息
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message.type === 'configUpdated' && message.config) {
+        const key = `${message.config._timestamp || Date.now()}`;
+        if (!this.loggedConfigUpdates.has(key)) {
+          this.loggedConfigUpdates.add(key);
           this.log('配置已更新');
-          if (oldValue) {
-            this.log('旧配置: ' + JSON.stringify(this.sanitizeConfig(oldValue), null, 2));
+          this.log('配置内容: ' + JSON.stringify(message.config, null, 2));
+        }
+      }
+    });
+
+    // 监听storage变化
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName === 'local') {
+        // 处理配置更新
+        if (changes[ConfigService.STORAGE_KEY]) {
+          const { newValue } = changes[ConfigService.STORAGE_KEY];
+          if (newValue) {
+            const key = `${newValue._timestamp || Date.now()}`;
+            if (!this.loggedConfigUpdates.has(key)) {
+              this.loggedConfigUpdates.add(key);
+              this.log('配置已更新');
+              this.log('配置内容: ' + JSON.stringify(this.sanitizeConfig(newValue), null, 2));
+            }
           }
-          this.log('新配置: ' + JSON.stringify(this.sanitizeConfig(newValue), null, 2));
-          this.updateDisplay(newValue);
         }
       }
     });
 
     // 保存配置
-    this.elements.configForm?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      try {
-        const config = this.getFormConfig();
-        this.log('正在保存配置...');
-        this.log('配置内容: ' + JSON.stringify(this.sanitizeConfig(config), null, 2));
-
-        await this.configService.saveConfig(config);
-        this.log('配置已保存');
-      } catch (error) {
-        this.log('保存配置失败: ' + error.message, 'error');
-        console.error('保存配置失败:', error);
-      }
-    });
+    const form = document.getElementById('configForm');
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        try {
+          const config = this.getFormConfig();
+          // 先记录日志
+          this.log('正在保存配置...');
+          this.log('配置内容: ' + JSON.stringify(this.sanitizeConfig(config), null, 2));
+          
+          // 然后保存配置
+          await this.configService.saveConfig(config);
+          this.log('配置已保存');
+          
+          // 更新显示
+          this.updateDisplay(config);
+        } catch (error) {
+          this.log('保存配置失败: ' + error.message, 'error');
+          console.error('保存配置失败:', error);
+        }
+      });
+    }
 
     // 根据同步类型显示/隐藏字段
     this.elements.syncType?.addEventListener('change', () => {
@@ -138,44 +151,48 @@ class DebugPage {
   log(message, type = 'info') {
     if (!this.elements.logContainer) return;
     
-    // 防止重复日志
-    const logKey = `${type}-${message}`;
-    if (this.loggedMessages.has(logKey)) {
-      return;
-    }
-    this.loggedMessages.add(logKey);
-    
     const time = new Date().toLocaleTimeString();
-    const entry = document.createElement('div');
-    entry.className = `log-entry ${type}`;
-    entry.textContent = `[${time}] ${message}`;
-    this.elements.logContainer.appendChild(entry);
-    this.elements.logContainer.scrollTop = this.elements.logContainer.scrollHeight;
-    
-    // 保存到日志历史
-    this.logHistory.push({
+    const logEntry = {
+      id: Date.now().toString(),
       time,
       message,
       type
-    });
+    };
+    
+    // 添加到日志历史
+    this.logHistory.push(logEntry);
     
     // 限制日志历史大小
     if (this.logHistory.length > this.maxLogHistory) {
       this.logHistory.shift();
     }
     
+    // 显示到页面
+    this.appendLogEntry(logEntry);
+    
+    // 保存到localStorage
+    this.saveLogHistory();
+    
     // 同时输出到控制台
     console.log(`[${type}] ${message}`);
-    
-    // 5分钟后清理日志key
-    setTimeout(() => {
-      this.loggedMessages.delete(logKey);
-    }, 300000);
+  }
+
+  appendLogEntry(entry) {
+    const logEntry = document.createElement('div');
+    logEntry.className = `log-entry ${entry.type}`;
+    logEntry.dataset.id = entry.id;
+    logEntry.textContent = `[${entry.time}] ${entry.message}`;
+    this.elements.logContainer?.appendChild(logEntry);
+    this.elements.logContainer.scrollTop = this.elements.logContainer.scrollHeight;
   }
 
   saveLogHistory() {
     try {
-      localStorage.setItem('debug_log_history', JSON.stringify(this.logHistory));
+      // 保存前去重，使用id作为唯一标识
+      const uniqueLogs = Array.from(
+        new Map(this.logHistory.map(log => [log.id, log])).values()
+      );
+      localStorage.setItem('debug_log_history', JSON.stringify(uniqueLogs));
     } catch (error) {
       console.error('保存日志历史失败:', error);
     }
@@ -184,15 +201,23 @@ class DebugPage {
   loadLogHistory() {
     try {
       const savedHistory = localStorage.getItem('debug_log_history');
-      if (savedHistory) {
+      if (savedHistory && this.elements.logContainer) {
+        // 清空现有日志显示
+        this.elements.logContainer.innerHTML = '';
+        
+        // 解析并去重日志
         const history = JSON.parse(savedHistory);
-        history.forEach(entry => {
-          const logEntry = document.createElement('div');
-          logEntry.className = `log-entry ${entry.type}`;
-          logEntry.textContent = `[${entry.time}] ${entry.message}`;
-          this.elements.logContainer?.appendChild(logEntry);
+        const uniqueLogs = Array.from(
+          new Map(history.map(log => [log.id, log])).values()
+        ).sort((a, b) => parseInt(a.id) - parseInt(b.id)); // 确保正确比较数字
+        
+        // 更新日志历史
+        this.logHistory = uniqueLogs;
+        
+        // 显示日志
+        uniqueLogs.forEach(entry => {
+          this.appendLogEntry(entry);
         });
-        this.logHistory = history;
       }
     } catch (error) {
       console.error('加载日志历史失败:', error);
@@ -257,4 +282,4 @@ class DebugPage {
 // 页面加载时初始化
 document.addEventListener('DOMContentLoaded', () => {
   window.debugPage = new DebugPage();
-}); 
+});

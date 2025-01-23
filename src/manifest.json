@@ -43,5 +43,8 @@
       ],
       "matches": ["<all_urls>"]
     }
-  ]
+  ],
+  "externally_connectable": {
+    "matches": ["*://*.github.com/*", "*://localhost/*", "*://127.0.0.1/*"]
+  }
 } 

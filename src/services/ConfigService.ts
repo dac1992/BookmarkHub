@@ -123,7 +123,8 @@ export class ConfigService {
         gitConfig: {
           ...currentConfig.gitConfig,
           ...(config.gitConfig || {})
-        }
+        },
+        _timestamp: now // 添加时间戳
       };
       
       // 验证配置
@@ -145,6 +146,40 @@ export class ConfigService {
           resolve();
         });
       });
+
+      // 广播配置更新事件
+      try {
+        // 1. 通过 storage 事件通知
+        await chrome.storage.local.set({
+          '_config_update': {
+            timestamp: now,
+            config: this.sanitizeConfig(mergedConfig)
+          }
+        });
+
+        // 2. 通过 runtime 消息通知
+        const tabs = await chrome.tabs.query({});
+        for (const tab of tabs) {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              type: 'configUpdated',
+              config: this.sanitizeConfig(mergedConfig)
+            }).catch(() => {
+              // 忽略发送失败的错误
+            });
+          }
+        }
+
+        // 3. 通过 runtime 广播
+        chrome.runtime.sendMessage({
+          type: 'configUpdated',
+          config: this.sanitizeConfig(mergedConfig)
+        }).catch(() => {
+          // 忽略发送失败的错误
+        });
+      } catch (error) {
+        this.logger.warn('发送配置更新通知失败:', error);
+      }
     } catch (error) {
       this.logger.error('保存配置失败:', error);
       throw error;

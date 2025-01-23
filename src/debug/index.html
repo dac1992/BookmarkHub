@@ -3,169 +3,161 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>配置测试</title>
+  <title>调试页面</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background: #f5f5f5;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 20px;
+      background-color: #f5f5f5;
     }
     .container {
-      max-width: 800px;
+      max-width: 1200px;
       margin: 0 auto;
-      background: white;
+      background-color: white;
       padding: 20px;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
     .section {
       margin-bottom: 20px;
-      padding: 15px;
-      border: 1px solid #ddd;
+      padding: 20px;
+      border: 1px solid #eee;
       border-radius: 4px;
     }
+    .section h2 {
+      margin-top: 0;
+      color: #333;
+    }
+    #logContainer {
+      background-color: #f8f9fa;
+      padding: 10px;
+      border-radius: 4px;
+      max-height: 400px;
+      overflow-y: auto;
+      font-family: monospace;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-radius: 2px;
+    }
+    .log-entry.info {
+      color: #0066cc;
+    }
+    .log-entry.error {
+      color: #dc3545;
+      background-color: #fff5f5;
+    }
+    .log-entry.warn {
+      color: #ffc107;
+      background-color: #fff9e6;
+    }
     pre {
-      background: #f8f8f8;
+      background-color: #f8f9fa;
       padding: 10px;
       border-radius: 4px;
       overflow-x: auto;
+      margin: 0;
     }
-    .config-form {
-      padding: 15px;
-      background: #f8f8f8;
-      border-radius: 4px;
-    }
-    .config-item {
+    .form-group {
       margin-bottom: 15px;
     }
-    .config-item label {
-      display: inline-block;
-      width: 120px;
-      margin-right: 10px;
+    label {
+      display: block;
+      margin-bottom: 5px;
+      color: #555;
     }
-    .config-item input[type="text"],
-    .config-item input[type="password"],
-    .config-item input[type="number"],
-    .config-item select {
-      padding: 5px;
+    input, select {
+      width: 100%;
+      padding: 8px;
       border: 1px solid #ddd;
       border-radius: 4px;
-      width: 250px;
+      box-sizing: border-box;
     }
-    .config-item input[type="checkbox"] {
-      margin-left: 0;
-    }
-    .button-group {
-      margin-top: 15px;
-    }
-    .button-group button {
-      margin-right: 10px;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 4px;
-      background: #4285f4;
+    button {
+      background-color: #007bff;
       color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
       cursor: pointer;
     }
-    .button-group button:hover {
-      background: #3367d6;
-    }
-    .log-container {
-      margin-top: 20px;
-      padding: 10px;
-      border-top: 1px solid #ccc;
-    }
-    .log-output {
-      height: 400px;
-      overflow-y: auto;
-      background: #f8f8f8;
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      font-family: monospace;
-      font-size: 12px;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .log-entry { margin: 2px 0; }
-    .log-entry.debug { color: #666; }
-    .log-entry.info { color: #0066cc; }
-    .log-entry.warn { color: #ff9900; }
-    .log-entry.error { color: #cc0000; }
-    h1 { 
-      margin: 0 0 20px 0;
-      color: #333;
+    button:hover {
+      background-color: #0056b3;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>配置测试</h1>
-    
+    <h1>调试页面</h1>
+
+    <!-- 当前配置 -->
     <div class="section">
       <h2>当前配置</h2>
-      <pre id="currentConfig">无配置</pre>
+      <pre id="currentConfig">加载中...</pre>
     </div>
 
+    <!-- 配置表单 -->
     <div class="section">
-      <h2>配置设置</h2>
-      <form id="configForm" class="config-form">
-        <div class="config-item">
-          <label>同步类型</label>
-          <select id="syncType" required>
+      <h2>配置测试</h2>
+      <form id="configForm">
+        <div class="form-group">
+          <label for="syncType">同步类型</label>
+          <select id="syncType" name="syncType">
             <option value="repository">Repository</option>
             <option value="gist">Gist</option>
           </select>
         </div>
 
-        <div class="config-item">
-          <label>GitHub Token</label>
-          <input type="password" id="githubToken" required>
+        <div class="form-group">
+          <label for="githubToken">GitHub Token</label>
+          <input type="password" id="githubToken" name="githubToken" placeholder="输入GitHub Token">
         </div>
 
-        <div class="config-item repo-field">
-          <label>仓库所有者</label>
-          <input type="text" id="repoOwner">
+        <div class="repo-field form-group">
+          <label for="repoOwner">仓库所有者</label>
+          <input type="text" id="repoOwner" name="repoOwner" placeholder="输入用户名或组织名">
         </div>
 
-        <div class="config-item repo-field">
-          <label>仓库名称</label>
-          <input type="text" id="repoName">
+        <div class="repo-field form-group">
+          <label for="repoName">仓库名称</label>
+          <input type="text" id="repoName" name="repoName" placeholder="输入仓库名">
         </div>
 
-        <div class="config-item repo-field">
-          <label>分支名称</label>
-          <input type="text" id="repoBranch" value="main">
+        <div class="repo-field form-group">
+          <label for="repoBranch">分支名称</label>
+          <input type="text" id="repoBranch" name="repoBranch" value="main" placeholder="输入分支名">
         </div>
 
-        <div class="config-item gist-field">
-          <label>Gist ID</label>
-          <input type="text" id="gistId">
+        <div class="gist-field form-group" style="display: none;">
+          <label for="gistId">Gist ID</label>
+          <input type="text" id="gistId" name="gistId" placeholder="留空将自动创建">
         </div>
 
-        <div class="config-item">
-          <label>同步间隔(分钟)</label>
-          <input type="number" id="syncInterval" value="60" min="1">
+        <div class="form-group">
+          <label for="syncInterval">同步间隔（分钟）</label>
+          <input type="number" id="syncInterval" name="syncInterval" value="60" min="1">
         </div>
 
-        <div class="config-item">
+        <div class="form-group">
           <label>
-            <input type="checkbox" id="autoSync">
+            <input type="checkbox" id="autoSync" name="autoSync">
             启用自动同步
           </label>
         </div>
 
-        <div class="button-group">
-          <button type="submit">保存设置</button>
-        </div>
+        <button type="submit">保存配置</button>
       </form>
     </div>
 
+    <!-- 日志输出 -->
     <div class="section">
       <h2>日志输出</h2>
-      <div id="logContainer" class="log-output"></div>
+      <div id="logContainer"></div>
     </div>
   </div>
+
   <script src="index.js"></script>
 </body>
 </html> 
