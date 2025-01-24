@@ -54,6 +54,11 @@ export class PopupPage {
     this.toast = new Toast();
     this.logger = Logger.getInstance();
 
+    // 添加同步进度监听器
+    this.syncService.addProgressListener((notification) => {
+      this.updateSyncStatus(notification.message, notification.progress || 0);
+    });
+
     this.elements = {
       syncPanel: null,
       settingsPanel: null,
@@ -264,12 +269,19 @@ export class PopupPage {
     }
   }
 
-  private updateSyncStatus(status: string, progress: number): void {
-    if (this.elements.syncStatus) {
-      this.elements.syncStatus.textContent = status;
+  private updateSyncStatus(message: string, progress: number): void {
+    const statusElement = document.getElementById('syncStatus');
+    const progressElement = document.getElementById('progressFill');
+    const percentageElement = document.getElementById('syncPercentage');
+
+    if (statusElement) {
+      statusElement.textContent = message;
     }
-    if (this.elements.syncProgress) {
-      this.elements.syncProgress.style.width = `${progress}%`;
+    if (progressElement) {
+      progressElement.style.width = `${progress}%`;
+    }
+    if (percentageElement) {
+      percentageElement.textContent = `${progress}%`;
     }
   }
 
@@ -341,7 +353,6 @@ export class PopupPage {
 
       // 开始同步
       await this.syncService.sync();
-      this.updateSyncStatus('同步完成', 100);
 
       // 更新最后同步时间
       const now = new Date();
@@ -376,9 +387,13 @@ export class PopupPage {
   }
 
   private async saveLastSyncTime(time: Date): Promise<void> {
-    await this.configService.updateConfig({
-      lastSyncTime: time.getTime()
-    });
+    try {
+      await this.configService.saveConfig({
+        lastSyncTime: time.getTime()
+      });
+    } catch (error) {
+      this.logger.error('保存同步时间失败:', error);
+    }
   }
 }
 

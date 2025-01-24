@@ -57,25 +57,40 @@ export class SyncService {
 
     try {
       // 验证配置
-      const errors = await this.configService.validateConfig();
+      const config = await this.configService.getConfig();
+      const errors = await this.configService.validateConfig(config);
       if (errors.length > 0) {
         throw new Error('配置验证失败: ' + errors.join(', '));
       }
 
+      // 验证 GitHub 认证
+      await this.githubService.authenticate();
+
       // 获取本地书签
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '读取本地书签...',
+        progress: 30
+      });
       const localBookmarks = await this.bookmarkService.getAllBookmarks();
       
       // 上传到GitHub
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '上传到 GitHub...',
+        progress: 60
+      });
       await this.githubService.uploadBookmarks(localBookmarks);
 
       // 更新最后同步时间
-      await this.configService.updateConfig({
+      await this.configService.saveConfig({
         lastSyncTime: Date.now()
       });
 
       this.notifyProgress({
         type: ProgressEventType.SUCCESS,
-        message: '同步完成'
+        message: '同步完成',
+        progress: 100
       });
     } catch (error: any) {
       this.logger.error('同步失败:', error);

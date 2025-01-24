@@ -19,6 +19,12 @@ export interface GitHubToken {
   scope: string;
 }
 
+interface RetryOptions {
+  maxRetries: number;
+  retryDelay: number;
+  shouldRetry: (error: Error) => boolean;
+}
+
 export class GitHubService {
   private static instance: GitHubService;
   private token: string | null = null;
@@ -81,6 +87,18 @@ export class GitHubService {
         if (!response.ok) {
           throw new Error('GitHub Token无效');
         }
+      }, {
+        maxAttempts: 3,
+        delayMs: 1000,
+        backoffFactor: 2,
+        retryableErrors: [
+          'rate limit exceeded',
+          'network error',
+          'timeout',
+          'ETIMEDOUT',
+          'ECONNRESET',
+          'ECONNREFUSED'
+        ]
       });
       
       this.notifyProgress({
@@ -176,7 +194,7 @@ export class GitHubService {
         }
 
         const data = await response.json();
-        await this.configService.updateConfig({
+        await this.configService.saveConfig({
           gitConfig: {
             ...config.gitConfig,
             gistId: data.id
@@ -209,6 +227,18 @@ export class GitHubService {
           throw new Error('更新Gist失败');
         }
       }
+    }, {
+      maxAttempts: 3,
+      delayMs: 1000,
+      backoffFactor: 2,
+      retryableErrors: [
+        'rate limit exceeded',
+        'network error',
+        'timeout',
+        'ETIMEDOUT',
+        'ECONNRESET',
+        'ECONNREFUSED'
+      ]
     });
   }
 
@@ -216,7 +246,7 @@ export class GitHubService {
     const config = await this.configService.getConfig();
     const content = JSON.stringify(syncData, null, 2);
     
-    await RetryHelper.execute(async () => {
+    return await RetryHelper.execute(async () => {
       this.notifyProgress({
         type: ProgressEventType.PROGRESS,
         message: '检查仓库状态...',
@@ -227,10 +257,10 @@ export class GitHubService {
       if (!config.gitConfig.owner || !config.gitConfig.repo) {
         throw new Error('仓库配置不完整');
       }
-      await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
 
-      // 确保分支存在
+      // 确保仓库和分支存在
       const branch = config.gitConfig.branch || this.DEFAULT_BRANCH;
+      await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
       await this.ensureBranch(config.gitConfig.owner, config.gitConfig.repo, branch);
 
       this.notifyProgress({
@@ -239,8 +269,10 @@ export class GitHubService {
         progress: 50
       });
 
-      // 获取文件SHA（如果存在）
+      // 获取当前文件（如果存在）
+      let currentData: BookmarkSyncData | null = null;
       let sha: string | undefined;
+      
       try {
         const response = await fetch(
           `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}?ref=${branch}`,
@@ -251,18 +283,35 @@ export class GitHubService {
             }
           }
         );
+
         if (response.ok) {
           const data = await response.json();
           sha = data.sha;
+          const content = Buffer.from(data.content, 'base64').toString('utf-8');
+          currentData = JSON.parse(content);
         }
       } catch (error) {
-        // 文件不存在，忽略错误
+        // 文件不存在，继续上传
+      }
+
+      // 如果文件存在，检查冲突
+      if (currentData) {
+        if (currentData.lastModified > syncData.lastModified) {
+          // 远程版本更新，需要合并
+          this.notifyProgress({
+            type: ProgressEventType.PROGRESS,
+            message: '检测到远程更新，正在合并...',
+            progress: 60
+          });
+          
+          syncData = await this.mergeBookmarks(currentData, syncData);
+        }
       }
 
       this.notifyProgress({
         type: ProgressEventType.PROGRESS,
         message: '上传文件到仓库...',
-        progress: 70
+        progress: 80
       });
 
       // 创建或更新文件
@@ -276,8 +325,8 @@ export class GitHubService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            message: '更新书签同步数据',
-            content: Buffer.from(content).toString('base64'),
+            message: `更新书签同步数据 [${new Date().toISOString()}]`,
+            content: Buffer.from(JSON.stringify(syncData, null, 2)).toString('base64'),
             branch,
             ...(sha ? { sha } : {})
           })
@@ -285,9 +334,80 @@ export class GitHubService {
       );
 
       if (!response.ok) {
-        throw new Error('上传到仓库失败');
+        const errorData = await response.json();
+        throw new Error(`上传到仓库失败: ${errorData.message}`);
+      }
+
+      this.notifyProgress({
+        type: ProgressEventType.PROGRESS,
+        message: '更新完成',
+        progress: 100
+      });
+    }, {
+      maxAttempts: 3,
+      delayMs: 1000,
+      backoffFactor: 2,
+      retryableErrors: [
+        'rate limit exceeded',
+        'network error',
+        'timeout',
+        'ETIMEDOUT',
+        'ECONNRESET',
+        'ECONNREFUSED'
+      ]
+    });
+  }
+
+  private async mergeBookmarks(remote: BookmarkSyncData, local: BookmarkSyncData): Promise<BookmarkSyncData> {
+    // 创建书签映射以便快速查找
+    const remoteMap = new Map<string, BookmarkNode>();
+    const localMap = new Map<string, BookmarkNode>();
+    
+    const mapBookmarks = (nodes: BookmarkNode[], map: Map<string, BookmarkNode>) => {
+      nodes.forEach(node => {
+        map.set(node.id, node);
+        if (node.children) {
+          mapBookmarks(node.children, map);
+        }
+      });
+    };
+
+    mapBookmarks(remote.bookmarks, remoteMap);
+    mapBookmarks(local.bookmarks, localMap);
+
+    // 合并书签
+    const mergedBookmarks = local.bookmarks.map(node => {
+      const remoteNode = remoteMap.get(node.id);
+      if (!remoteNode) {
+        // 本地新增的节点
+        return node;
+      }
+
+      // 比较修改时间，使用最新的版本
+      if (remoteNode.dateAdded > node.dateAdded) {
+        return remoteNode;
+      }
+      return node;
+    });
+
+    // 添加远程新增的节点
+    remote.bookmarks.forEach(node => {
+      if (!localMap.has(node.id)) {
+        mergedBookmarks.push(node);
       }
     });
+
+    return {
+      ...local,
+      bookmarks: mergedBookmarks,
+      lastModified: Date.now(),
+      metadata: {
+        ...local.metadata,
+        totalCount: this.countBookmarks(mergedBookmarks),
+        folderCount: this.countFolders(mergedBookmarks),
+        lastSync: Date.now()
+      }
+    };
   }
 
   private async ensureRepository(owner: string, repo: string): Promise<void> {
@@ -428,7 +548,7 @@ export class GitHubService {
       });
 
       // 更新最后同步时间
-      await this.configService.updateConfig({
+      await this.configService.saveConfig({
         lastSyncTime: Date.now()
       });
 
@@ -472,6 +592,18 @@ export class GitHubService {
       const data = await response.json();
       const content = data.files[this.SYNC_FILE].content;
       return JSON.parse(content);
+    }, {
+      maxAttempts: 3,
+      delayMs: 1000,
+      backoffFactor: 2,
+      retryableErrors: [
+        'rate limit exceeded',
+        'network error',
+        'timeout',
+        'ETIMEDOUT',
+        'ECONNRESET',
+        'ECONNREFUSED'
+      ]
     });
   }
 
@@ -506,6 +638,18 @@ export class GitHubService {
       const data = await response.json();
       const content = Buffer.from(data.content, 'base64').toString('utf-8');
       return JSON.parse(content);
+    }, {
+      maxAttempts: 3,
+      delayMs: 1000,
+      backoffFactor: 2,
+      retryableErrors: [
+        'rate limit exceeded',
+        'network error',
+        'timeout',
+        'ETIMEDOUT',
+        'ECONNRESET',
+        'ECONNREFUSED'
+      ]
     });
   }
 
@@ -560,7 +704,7 @@ export class GitHubService {
 
   public async clearToken(): Promise<void> {
     try {
-      await this.configService.updateConfig({
+      await this.configService.saveConfig({
         gitConfig: {
           token: ''
         }

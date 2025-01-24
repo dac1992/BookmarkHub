@@ -7,7 +7,8 @@
    - npm run build 构建
    - 新建文件前通篇浏览项目，尤其是 issues和docs文件夹
    - 已经有的文件不要重复创建
-   - 如需要日志用于调试，请使用单独的debug文件，在 /src/debug 目录下
+   - 调试用debug页面，在 /src/debug 目录下
+   - windows powershell的命令分开执行
 
 2. 文件命名规则
    - 检查点文件：`checkpoint-XXX.md`
