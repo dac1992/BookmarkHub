@@ -25,6 +25,11 @@ interface RetryOptions {
   shouldRetry: (error: Error) => boolean;
 }
 
+interface GitHubError extends Error {
+  message: string;
+  response?: Response;
+}
+
 export class GitHubService {
   private static instance: GitHubService;
   private token: string | null = null;
@@ -244,6 +249,12 @@ export class GitHubService {
 
   private async uploadToRepo(syncData: BookmarkSyncData): Promise<void> {
     const config = await this.configService.getConfig();
+    
+    // 验证数据完整性
+    if (!this.validateSyncData(syncData)) {
+      throw new Error('书签数据格式无效');
+    }
+    
     const content = JSON.stringify(syncData, null, 2);
     
     return await RetryHelper.execute(async () => {
@@ -253,7 +264,7 @@ export class GitHubService {
         progress: 30
       });
 
-      // 确保仓库存在
+      // 确保仓库配置完整
       if (!config.gitConfig.owner || !config.gitConfig.repo) {
         throw new Error('仓库配置不完整');
       }
@@ -265,7 +276,7 @@ export class GitHubService {
 
       this.notifyProgress({
         type: ProgressEventType.PROGRESS,
-        message: '检查文件状态...',
+        message: '检查远程文件...',
         progress: 50
       });
 
@@ -287,24 +298,44 @@ export class GitHubService {
         if (response.ok) {
           const data = await response.json();
           sha = data.sha;
-          const fileContent = atob(data.content);
-          currentData = JSON.parse(fileContent);
+          // 正确解码远程文件内容
+          const fileContent = decodeURIComponent(atob(data.content));
+          try {
+            currentData = JSON.parse(fileContent);
+            // 验证远程数据格式
+            if (!this.validateSyncData(currentData)) {
+              this.logger.warn('远程数据格式无效，将使用本地数据');
+              currentData = null;
+            }
+          } catch (e) {
+            this.logger.error('解析远程数据失败:', e);
+            currentData = null;
+          }
         }
       } catch (error) {
-        // 文件不存在，继续上传
+        const gitError = error as GitHubError;
+        this.logger.warn('获取远程文件失败，将创建新文件:', gitError.message);
       }
 
-      // 如果文件存在，检查冲突
+      // 如果文件存在且有效，检查冲突
       if (currentData) {
-        if (currentData.lastModified > syncData.lastModified) {
-          // 远程版本更新，需要合并
+        if (currentData.lastModified >= syncData.lastModified) {
+          // 远程版本更新或相同，需要合并
           this.notifyProgress({
             type: ProgressEventType.PROGRESS,
             message: '检测到远程更新，正在合并...',
             progress: 60
           });
           
-          syncData = await this.mergeBookmarks(currentData, syncData);
+          try {
+            syncData = await this.mergeBookmarks(currentData, syncData);
+          } catch (error: unknown) {
+            if (error instanceof Error) {
+              throw new Error(`合并书签失败: ${error.message}`);
+            } else {
+              throw new Error(`合并书签失败: ${String(error)}`);
+            }
+          }
         }
       }
 
@@ -315,6 +346,7 @@ export class GitHubService {
       });
 
       // 创建或更新文件
+      const uploadContent = btoa(unescape(encodeURIComponent(JSON.stringify(syncData, null, 2))));
       const response = await fetch(
         `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}`,
         {
@@ -326,7 +358,7 @@ export class GitHubService {
           },
           body: JSON.stringify({
             message: `更新书签同步数据 [${new Date().toISOString()}]`,
-            content: btoa(encodeURIComponent(content)),
+            content: uploadContent,
             branch,
             ...(sha ? { sha } : {})
           })
@@ -356,6 +388,105 @@ export class GitHubService {
         'ECONNREFUSED'
       ]
     });
+  }
+
+  private validateSyncData(data: any): data is BookmarkSyncData {
+    try {
+      if (!data || typeof data !== 'object') return false;
+      
+      // 验证基本结构
+      if (!data.version || typeof data.version !== 'string' ||
+          !data.lastModified || typeof data.lastModified !== 'number' ||
+          !data.deviceId || typeof data.deviceId !== 'string' ||
+          !Array.isArray(data.bookmarks)) {
+        this.logger.warn('基本结构验证失败:', data);
+        return false;
+      }
+      
+      // 验证元数据
+      if (!data.metadata || typeof data.metadata !== 'object') {
+        this.logger.warn('元数据结构验证失败:', data.metadata);
+        return false;
+      }
+      
+      const { totalCount, folderCount, lastSync, syncVersion } = data.metadata;
+      if (typeof totalCount !== 'number' || 
+          typeof folderCount !== 'number' || 
+          typeof lastSync !== 'number' || 
+          typeof syncVersion !== 'string') {
+        this.logger.warn('元数据字段验证失败:', data.metadata);
+        return false;
+      }
+      
+      // 验证书签数组
+      const isValid = data.bookmarks.every((bookmark: any) => this.validateBookmarkNode(bookmark));
+      if (!isValid) {
+        this.logger.warn('书签数据验证失败:', data.bookmarks);
+      }
+      return isValid;
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        this.logger.error('数据验证过程出错:', error.message);
+      } else {
+        this.logger.error('数据验证过程出错:', String(error));
+      }
+      return false;
+    }
+  }
+
+  private validateBookmarkNode(node: any): boolean {
+    try {
+      if (!node || typeof node !== 'object') {
+        this.logger.warn('节点不是对象:', node);
+        return false;
+      }
+      
+      // 验证必需字段
+      if (!node.id || typeof node.id !== 'string') {
+        this.logger.warn('节点ID无效:', node);
+        return false;
+      }
+      
+      if (!node.title || typeof node.title !== 'string') {
+        this.logger.warn('节点标题无效:', node);
+        return false;
+      }
+      
+      if (typeof node.index !== 'number') {
+        this.logger.warn('节点索引无效:', node);
+        return false;
+      }
+      
+      // url是可选的，但如果存在必须是字符串
+      if (node.url !== undefined && typeof node.url !== 'string') {
+        this.logger.warn('节点URL无效:', node);
+        return false;
+      }
+      
+      // parentId是可选的，但如果存在必须是字符串
+      if (node.parentId !== undefined && typeof node.parentId !== 'string') {
+        this.logger.warn('节点父ID无效:', node);
+        return false;
+      }
+      
+      // 验证children数组（如果存在）
+      if (node.children !== undefined) {
+        if (!Array.isArray(node.children)) {
+          this.logger.warn('节点子节点不是数组:', node);
+          return false;
+        }
+        return node.children.every((child: any) => this.validateBookmarkNode(child));
+      }
+      
+      return true;
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        this.logger.error('节点验证过程出错:', error.message);
+      } else {
+        this.logger.error('节点验证过程出错:', String(error));
+      }
+      return false;
+    }
   }
 
   private async mergeBookmarks(remote: BookmarkSyncData, local: BookmarkSyncData): Promise<BookmarkSyncData> {
@@ -717,15 +848,25 @@ export class GitHubService {
   }
 
   private normalizeBookmark(node: chrome.bookmarks.BookmarkTreeNode, index: number): BookmarkNode {
-    return {
-      id: node.id,
-      title: node.title || '',
-      url: node.url,
-      parentId: node.parentId || undefined,
+    // 确保所有必需字段都有值
+    const normalizedNode: BookmarkNode = {
+      id: node.id || `bookmark-${Date.now()}-${index}`,
+      title: node.title || '未命名书签',
+      url: node.url || '',
+      parentId: node.parentId || '0',
       dateAdded: node.dateAdded || Date.now(),
-      index: node.index || index,
-      children: node.children?.map((child, idx) => this.normalizeBookmark(child, idx))
+      index: typeof node.index === 'number' ? node.index : index,
+      children: []
     };
+
+    // 处理子节点
+    if (node.children && Array.isArray(node.children)) {
+      normalizedNode.children = node.children.map((child, idx) => 
+        this.normalizeBookmark(child, idx)
+      );
+    }
+
+    return normalizedNode;
   }
 }
 
