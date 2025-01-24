@@ -287,8 +287,8 @@ export class GitHubService {
         if (response.ok) {
           const data = await response.json();
           sha = data.sha;
-          const content = Buffer.from(data.content, 'base64').toString('utf-8');
-          currentData = JSON.parse(content);
+          const fileContent = atob(data.content);
+          currentData = JSON.parse(fileContent);
         }
       } catch (error) {
         // 文件不存在，继续上传
@@ -326,7 +326,7 @@ export class GitHubService {
           },
           body: JSON.stringify({
             message: `更新书签同步数据 [${new Date().toISOString()}]`,
-            content: Buffer.from(JSON.stringify(syncData, null, 2)).toString('base64'),
+            content: btoa(encodeURIComponent(content)),
             branch,
             ...(sha ? { sha } : {})
           })
@@ -636,7 +636,7 @@ export class GitHubService {
       }
 
       const data = await response.json();
-      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+      const content = decodeURIComponent(atob(data.content));
       return JSON.parse(content);
     }, {
       maxAttempts: 3,
