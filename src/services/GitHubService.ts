@@ -344,6 +344,9 @@ export class GitHubService {
     const content = JSON.stringify(syncData, null, 2);
     let retryCount = 0;
     const maxRetries = 3;
+
+    // 使用固定的文件名
+    const fileName = 'bookmarks.json';
     
     while (retryCount < maxRetries) {
       try {
@@ -363,11 +366,28 @@ export class GitHubService {
         await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
         await this.ensureBranch(config.gitConfig.owner, config.gitConfig.repo, branch);
 
-        // 生成新的文件名，使用时间戳
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const fileName = `${this.SYNC_FILE_PREFIX}_${timestamp}.json`;
+        // 获取文件的当前 SHA（如果存在）
+        let sha: string | undefined;
+        try {
+          const fileResponse = await fetch(
+            `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${fileName}?ref=${branch}`,
+            {
+              headers: {
+                'Authorization': `token ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json'
+              }
+            }
+          );
+          if (fileResponse.ok) {
+            const fileData = await fileResponse.json();
+            sha = fileData.sha;
+          }
+        } catch (error) {
+          // 文件不存在，忽略错误
+          this.logger.debug('文件不存在，将创建新文件');
+        }
 
-        // 创建新文件
+        // 创建或更新文件
         const uploadContent = btoa(unescape(encodeURIComponent(content)));
         const uploadResponse = await fetch(
           `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${fileName}`,
@@ -379,9 +399,10 @@ export class GitHubService {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              message: `更新书签同步数据 [${timestamp}]`,
+              message: `更新书签同步数据 [${new Date().toISOString()}]`,
               content: uploadContent,
-              branch
+              branch,
+              sha // 如果文件存在，包含 SHA
             })
           }
         );
@@ -390,7 +411,7 @@ export class GitHubService {
           const errorData = await uploadResponse.json();
           if (uploadResponse.status === 422 && errorData.message?.includes('sha')) {
             retryCount++;
-            this.logger.debug(`文件已存在，重新尝试上传 (${retryCount}/${maxRetries})`);
+            this.logger.debug(`文件已被修改，重新获取SHA并重试 (${retryCount}/${maxRetries})`);
             // 等待一秒后重试
             await new Promise(resolve => setTimeout(resolve, 1000));
             continue;
@@ -398,8 +419,7 @@ export class GitHubService {
           throw new Error(`上传到仓库失败: ${errorData.message}`);
         }
 
-        // 上传成功后，清理旧文件
-        await this.cleanupOldFiles(config.gitConfig.owner, config.gitConfig.repo, branch);
+        // 上传成功，不需要清理旧文件
         return;
       } catch (error: any) {
         if (error.message?.includes('API rate limit exceeded')) {
@@ -412,59 +432,6 @@ export class GitHubService {
         this.logger.debug(`上传失败，重新尝试 (${retryCount}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
-    }
-  }
-
-  private async cleanupOldFiles(owner: string, repo: string, branch: string): Promise<void> {
-    try {
-      // 获取仓库中的所有文件
-      const response = await fetch(
-        `${this.API_BASE}/repos/${owner}/${repo}/contents?ref=${branch}`,
-        {
-          headers: {
-            'Authorization': `token ${this.token}`,
-            'Accept': 'application/vnd.github.v3+json'
-          }
-        }
-      );
-
-      if (!response.ok) {
-        this.logger.warn('获取仓库文件列表失败，跳过清理');
-        return;
-      }
-
-      const files = await response.json();
-      const bookmarkFiles = files
-        .filter((file: any) => file.name.startsWith(this.SYNC_FILE_PREFIX))
-        .sort((a: any, b: any) => b.name.localeCompare(a.name));  // 按文件名降序排序
-
-      // 保留最新的5个文件，删除其他的
-      const filesToDelete = bookmarkFiles.slice(5);
-      
-      for (const file of filesToDelete) {
-        try {
-          await fetch(
-            `${this.API_BASE}/repos/${owner}/${repo}/contents/${file.path}`,
-            {
-              method: 'DELETE',
-              headers: {
-                'Authorization': `token ${this.token}`,
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                message: `清理旧的书签同步文件 [${file.name}]`,
-                sha: file.sha,
-                branch
-              })
-            }
-          );
-        } catch (error) {
-          this.logger.warn(`清理旧文件 ${file.name} 失败:`, error);
-        }
-      }
-    } catch (error) {
-      this.logger.warn('清理旧文件失败:', error);
     }
   }
 
