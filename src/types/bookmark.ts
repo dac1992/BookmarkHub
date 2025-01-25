@@ -105,6 +105,7 @@ export interface SyncStatus {
   lastSync: number;
   status: 'success' | 'error' | 'syncing';
   error?: string;
+  bookmarkCount?: number;
 }
 
 /**

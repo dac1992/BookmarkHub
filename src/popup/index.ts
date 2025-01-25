@@ -6,6 +6,7 @@ import { Toast } from '../components/Toast';
 import { Logger } from '../utils/logger';
 import { SyncConfig } from '../types/bookmark';
 import './styles/popup.css';
+import { SyncStatusService } from '../services/SyncStatusService';
 
 const logger = Logger.getInstance();
 logger.info('Popup页面加载');
@@ -44,6 +45,7 @@ export class PopupPage {
   private logger: Logger;
   private elements: Elements;
   private syncInProgress = false;
+  private syncStatusService: SyncStatusService;
 
   constructor() {
     logger.info('初始化PopupManager');
@@ -53,6 +55,7 @@ export class PopupPage {
     this.syncService = SyncService.getInstance();
     this.toast = new Toast();
     this.logger = Logger.getInstance();
+    this.syncStatusService = SyncStatusService.getInstance();
 
     // 添加同步进度监听器
     this.syncService.addProgressListener((notification) => {
@@ -160,8 +163,7 @@ export class PopupPage {
       await this.loadSettings();
 
       // 加载书签数量
-      const bookmarks = await this.bookmarkService.getAllBookmarks();
-      this.updateBookmarkCount(bookmarks.length);
+      await this.updateBookmarkCount();
 
       // 加载上次同步时间
       const lastSync = await this.getLastSyncTime();
@@ -285,9 +287,14 @@ export class PopupPage {
     }
   }
 
-  private updateBookmarkCount(count: number): void {
-    if (this.elements.bookmarkCount) {
-      this.elements.bookmarkCount.textContent = String(count);
+  private async updateBookmarkCount(): Promise<void> {
+    try {
+      const status = await this.syncStatusService.getStatus();
+      if (this.elements.bookmarkCount) {
+        this.elements.bookmarkCount.textContent = status.bookmarkCount?.toString() || '0';
+      }
+    } catch (error) {
+      this.logger.error('获取书签数量失败:', error);
     }
   }
 
@@ -360,8 +367,7 @@ export class PopupPage {
       await this.updateLastSyncTime(now);
       
       // 更新书签数量
-      const bookmarks = await this.bookmarkService.getAllBookmarks();
-      this.updateBookmarkCount(bookmarks.length);
+      await this.updateBookmarkCount();
 
     } catch (error) {
       this.logger.error('同步失败:', error);

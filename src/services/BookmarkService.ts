@@ -290,6 +290,8 @@ export class BookmarkService {
 
   private normalizeBookmarks(nodes: chrome.bookmarks.BookmarkTreeNode[]): BookmarkNode[] {
     const result: BookmarkNode[] = [];
+    let validBookmarkCount = 0;
+    let validFolderCount = 0;
     
     const processNode = (node: chrome.bookmarks.BookmarkTreeNode): BookmarkNode | undefined => {
       // 跳过根节点，但处理其子节点
@@ -316,6 +318,15 @@ export class BookmarkService {
         children: []
       };
 
+      // 统计有效书签和文件夹
+      if (node.url && node.url.trim() !== '') {
+        validBookmarkCount++;
+      } else if (!node.url && node.id !== '0' && 
+                !(node.id === '1' && (!node.children || node.children.length === 0)) && 
+                !(node.id === '2' && (!node.children || node.children.length === 0))) {
+        validFolderCount++;
+      }
+
       // 处理子节点
       if (node.children) {
         normalizedNode.children = node.children
@@ -331,11 +342,12 @@ export class BookmarkService {
       processNode(node);
     });
 
-    // 添加调试日志
-    this.logger.debug('书签统计:', {
-      总数: result.length,
-      文件夹数: result.filter(node => !node.url).length,
-      书签数: result.filter(node => node.url).length
+    // 添加详细的调试日志
+    this.logger.debug('书签统计详情:', {
+      总节点数: result.length,
+      有效书签数: validBookmarkCount,
+      有效文件夹数: validFolderCount,
+      原始数据长度: nodes.length
     });
 
     return result;
@@ -421,24 +433,42 @@ export class BookmarkService {
   }
 
   public async getBookmarkStats(): Promise<{ bookmarkCount: number; folderCount: number }> {
-    const bookmarks = await this.getAllBookmarks();
+    // 获取完整的书签树
+    const bookmarkTree = await chrome.bookmarks.getTree();
     let bookmarkCount = 0;
     let folderCount = 0;
 
     const countNodes = (nodes: BookmarkNode[]) => {
       for (const node of nodes) {
-        if (node.url) {
+        // 只统计有URL的节点作为书签
+        if (node.url && node.url.trim() !== '') {
           bookmarkCount++;
-        } else if (node.id !== '1' && node.id !== '2') {
+        } 
+        // 统计文件夹（排除根文件夹和空的默认文件夹）
+        else if (!node.url && node.id !== '0' && 
+                !(node.id === '1' && (!node.children || node.children.length === 0)) && 
+                !(node.id === '2' && (!node.children || node.children.length === 0))) {
           folderCount++;
         }
-        if (node.children) {
+
+        // 递归处理子节点
+        if (node.children && node.children.length > 0) {
           countNodes(node.children);
         }
       }
     };
 
-    countNodes(bookmarks);
+    // 使用 normalizeBookmarks 处理书签树
+    const normalizedTree = this.normalizeBookmarks(bookmarkTree);
+    countNodes(normalizedTree);
+
+    // 添加调试日志
+    this.logger.debug('getBookmarkStats统计:', {
+      书签数: bookmarkCount,
+      文件夹数: folderCount,
+      总节点数: normalizedTree.length
+    });
+
     return { bookmarkCount, folderCount };
   }
 }

@@ -104,39 +104,17 @@ export class SyncService {
         // 验证 GitHub 认证
         await this.githubService.authenticate();
 
+        // 获取本地书签统计
+        const localStats = await this.bookmarkService.getBookmarkStats();
+        
         // 获取本地书签
         this.notifyProgress({
           type: ProgressEventType.PROGRESS,
-          message: '读取本地书签...',
+          message: `读取本地书签(${localStats.bookmarkCount}个)...`,
           progress: 30
         });
         const localBookmarks = await this.bookmarkService.getAllBookmarks();
         
-        // 获取本地统计
-        const localStats = await this.bookmarkService.getBookmarkStats();
-        
-        // 尝试从GitHub获取最新数据
-        this.notifyProgress({
-          type: ProgressEventType.PROGRESS,
-          message: '检查远程数据...',
-          progress: 50
-        });
-        
-        let remoteStats;
-        try {
-          const remoteData = await this.githubService.downloadBookmarks();
-          remoteStats = {
-            bookmarkCount: this.githubService.countBookmarks(remoteData),
-            folderCount: this.githubService.countFolders(remoteData)
-          };
-        } catch (error) {
-          this.logger.warn('获取远程数据失败，将使用本地数据:', error);
-          remoteStats = {
-            bookmarkCount: this.githubService.countBookmarks(localBookmarks),
-            folderCount: this.githubService.countFolders(localBookmarks)
-          };
-        }
-
         // 上传到GitHub
         this.notifyProgress({
           type: ProgressEventType.PROGRESS,
@@ -152,8 +130,13 @@ export class SyncService {
           lastSyncTime: syncTime
         });
 
+        // 保存书签数量到本地存储
+        await chrome.storage.local.set({
+          'lastSyncBookmarkCount': localStats.bookmarkCount
+        });
+
         // 构建成功状态消息
-        const statusMessage = `同步完成 | 本地：${localStats.bookmarkCount}书签/${localStats.folderCount}文件夹 | GitHub：${remoteStats.bookmarkCount}书签/${remoteStats.folderCount}文件夹`;
+        const statusMessage = `同步完成 | ${localStats.bookmarkCount}书签/${localStats.folderCount}文件夹`;
 
         // 保存完整的同步状态
         const successState = {
@@ -162,7 +145,7 @@ export class SyncService {
           progress: 100,
           lastSyncTime: syncTime,
           localStats,
-          remoteStats
+          bookmarkCount: localStats.bookmarkCount
         };
 
         await this.saveSyncState(successState);
@@ -172,7 +155,6 @@ export class SyncService {
           progress: 100
         });
 
-        // 同步成功后，不再自动重置状态
         this.syncInProgress = false;
       } catch (error: any) {
         this.logger.error(`同步尝试 ${retryCount + 1}/${maxRetries} 失败:`, error);
@@ -180,15 +162,14 @@ export class SyncService {
         // 检查是否需要重试
         const shouldRetry = (
           retryCount < maxRetries - 1 && 
-          (error.message?.includes('does not match') || 
-           error.message?.includes('is at') && error.message?.includes('but expected'))
+          error.message?.includes('API rate limit exceeded')
         );
 
         if (shouldRetry) {
           retryCount++;
           this.notifyProgress({
             type: ProgressEventType.PROGRESS,
-            message: `检测到文件冲突，正在重试 (${retryCount}/${maxRetries})...`,
+            message: `API限制，等待重试 (${retryCount}/${maxRetries})...`,
             progress: 30
           });
           // 等待一段时间后重试

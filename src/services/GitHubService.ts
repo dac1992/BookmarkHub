@@ -170,6 +170,10 @@ export class GitHubService {
     
     await RetryHelper.execute(async () => {
       try {
+        // 生成新的文件名，使用时间戳
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `${this.SYNC_FILE_PREFIX}_${timestamp}.json`;
+
         if (!config.gitConfig.gistId) {
           this.notifyProgress({
             type: ProgressEventType.PROGRESS,
@@ -188,7 +192,7 @@ export class GitHubService {
               description: 'Browser Bookmarks Sync',
               public: false,
               files: {
-                [this.SYNC_FILE_PREFIX]: {
+                [fileName]: {
                   content
                 }
               }
@@ -210,10 +214,10 @@ export class GitHubService {
         } else {
           this.notifyProgress({
             type: ProgressEventType.PROGRESS,
-            message: '更新已有Gist...',
+            message: '更新Gist...',
             progress: 50
           });
-          // 更新已有的Gist
+          // 更新Gist，添加新文件
           const response = await fetch(`${this.API_BASE}/gists/${config.gitConfig.gistId}`, {
             method: 'PATCH',
             headers: {
@@ -223,7 +227,7 @@ export class GitHubService {
             },
             body: JSON.stringify({
               files: {
-                [this.SYNC_FILE_PREFIX]: {
+                [fileName]: {
                   content
                 }
               }
@@ -244,6 +248,9 @@ export class GitHubService {
             }
             throw new Error(`更新Gist失败: ${response.status} ${errorData.message || response.statusText}`);
           }
+
+          // 清理旧文件
+          await this.cleanupGistFiles(config.gitConfig.gistId);
         }
       } catch (error: any) {
         // 处理API限制错误
@@ -254,8 +261,8 @@ export class GitHubService {
         throw error;
       }
     }, {
-      maxAttempts: 3,
-      delayMs: 2000, // 增加延迟时间
+      maxAttempts: 2,
+      delayMs: 1000,
       backoffFactor: 2,
       retryableErrors: [
         'rate limit exceeded',
@@ -263,10 +270,62 @@ export class GitHubService {
         'timeout',
         'ETIMEDOUT',
         'ECONNRESET',
-        'ECONNREFUSED',
-        'Gist不存在，将重新创建'
+        'ECONNREFUSED'
       ]
     });
+  }
+
+  private async cleanupGistFiles(gistId: string): Promise<void> {
+    try {
+      // 获取Gist内容
+      const response = await fetch(
+        `${this.API_BASE}/gists/${gistId}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        this.logger.warn('获取Gist内容失败，跳过清理');
+        return;
+      }
+
+      const data = await response.json();
+      const files = Object.keys(data.files)
+        .filter(name => name.startsWith(this.SYNC_FILE_PREFIX))
+        .sort((a, b) => b.localeCompare(a));  // 按文件名降序排序
+
+      // 保留最新的5个文件，删除其他的
+      const filesToDelete = files.slice(5);
+      if (filesToDelete.length === 0) return;
+
+      // 创建更新对象，将要删除的文件标记为null
+      const updateFiles: Record<string, null> = {};
+      filesToDelete.forEach(file => {
+        updateFiles[file] = null;
+      });
+
+      // 删除旧文件
+      await fetch(
+        `${this.API_BASE}/gists/${gistId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            files: updateFiles
+          })
+        }
+      );
+    } catch (error) {
+      this.logger.warn('清理Gist旧文件失败:', error);
+    }
   }
 
   private async uploadToRepo(syncData: BookmarkSyncData): Promise<void> {
@@ -818,7 +877,8 @@ export class GitHubService {
     let count = 0;
     const countNodes = (nodes: BookmarkNode[]) => {
       for (const node of nodes) {
-        if (node.url) {
+        // 只统计有效的 URL 作为书签（非空 URL）
+        if (node.url && node.url.trim() !== '') {
           count++;
         }
         if (node.children) {
@@ -834,8 +894,10 @@ export class GitHubService {
     let count = 0;
     const countNodes = (nodes: BookmarkNode[]) => {
       for (const node of nodes) {
-        // 排除默认的根文件夹（"书签栏"和"其他书签"）
-        if (!node.url && node.id !== "1" && node.id !== "2") {
+        // 排除根节点和空的默认文件夹
+        if (!node.url && node.id !== '0' && 
+            !(node.id === '1' && (!node.children || node.children.length === 0)) && 
+            !(node.id === '2' && (!node.children || node.children.length === 0))) {
           count++;
         }
         if (node.children) {
