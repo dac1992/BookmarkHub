@@ -419,6 +419,28 @@ export class BookmarkService {
           newIndex: moveInfo.index || 0
       };
   }
+
+  public async getBookmarkStats(): Promise<{ bookmarkCount: number; folderCount: number }> {
+    const bookmarks = await this.getAllBookmarks();
+    let bookmarkCount = 0;
+    let folderCount = 0;
+
+    const countNodes = (nodes: BookmarkNode[]) => {
+      for (const node of nodes) {
+        if (node.url) {
+          bookmarkCount++;
+        } else if (node.id !== '1' && node.id !== '2') {
+          folderCount++;
+        }
+        if (node.children) {
+          countNodes(node.children);
+        }
+      }
+    };
+
+    countNodes(bookmarks);
+    return { bookmarkCount, folderCount };
+  }
 }
 
 export default BookmarkService; 

@@ -369,7 +369,7 @@ export class GitHubService {
 
       // 创建或更新文件
       const uploadContent = btoa(unescape(encodeURIComponent(JSON.stringify(syncData, null, 2))));
-      const response = await fetch(
+      const uploadResponse = await fetch(
         `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}`,
         {
           method: 'PUT',
@@ -387,8 +387,13 @@ export class GitHubService {
         }
       );
 
-      if (!response.ok) {
-        const errorData = await response.json();
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json();
+        if (uploadResponse.status === 422 && errorData.message?.includes('sha')) {
+          // SHA不匹配，说明文件已被修改，重试整个过程
+          this.logger.warn('文件已被修改，重新尝试上传');
+          throw new Error('RETRY_UPLOAD');
+        }
         throw new Error(`上传到仓库失败: ${errorData.message}`);
       }
 
@@ -407,7 +412,8 @@ export class GitHubService {
         'timeout',
         'ETIMEDOUT',
         'ECONNRESET',
-        'ECONNREFUSED'
+        'ECONNREFUSED',
+        'RETRY_UPLOAD'  // 添加新的重试错误类型
       ]
     });
   }
@@ -806,7 +812,7 @@ export class GitHubService {
     });
   }
 
-  private countBookmarks(bookmarks: BookmarkNode[]): number {
+  public countBookmarks(bookmarks: BookmarkNode[]): number {
     let count = 0;
     const countNodes = (nodes: BookmarkNode[]) => {
       for (const node of nodes) {
@@ -822,7 +828,7 @@ export class GitHubService {
     return count;
   }
 
-  private countFolders(bookmarks: BookmarkNode[]): number {
+  public countFolders(bookmarks: BookmarkNode[]): number {
     let count = 0;
     const countNodes = (nodes: BookmarkNode[]) => {
       for (const node of nodes) {

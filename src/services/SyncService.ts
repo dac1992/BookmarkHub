@@ -87,9 +87,16 @@ export class SyncService {
         lastSyncTime: Date.now()
       });
 
+      // 获取本地和远程的书签统计
+      const localStats = await this.bookmarkService.getBookmarkStats();
+      const remoteStats = {
+        bookmarkCount: this.githubService.countBookmarks(localBookmarks),
+        folderCount: this.githubService.countFolders(localBookmarks)
+      };
+
       this.notifyProgress({
         type: ProgressEventType.SUCCESS,
-        message: '同步完成',
+        message: `同步完成 | 本地：${localStats.bookmarkCount}书签/${localStats.folderCount}文件夹 | GitHub：${remoteStats.bookmarkCount}书签/${remoteStats.folderCount}文件夹`,
         progress: 100
       });
     } catch (error: any) {
@@ -101,10 +108,8 @@ export class SyncService {
       });
       throw error;
     } finally {
-      // 确保在任何情况下都重置同步状态
-      setTimeout(() => {
-        this.syncInProgress = false;
-      }, 1000); // 添加1秒延迟，防止状态切换太快
+      // 确保在任何情况下都重置同步状态，但不清除进度显示
+      this.syncInProgress = false;
     }
   }
 
