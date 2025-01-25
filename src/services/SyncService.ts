@@ -76,7 +76,8 @@ export class SyncService {
     this.saveSyncState({
       status: notification.type,
       message: notification.message,
-      progress: notification.progress || this.currentSyncState.progress
+      progress: notification.progress || this.currentSyncState.progress,
+      lastSyncTime: notification.type === ProgressEventType.SUCCESS ? Date.now() : this.currentSyncState.lastSyncTime
     });
     // 通知监听器
     this.progressListeners.forEach(listener => listener(notification));
@@ -138,7 +139,7 @@ export class SyncService {
         // 构建成功状态消息
         const statusMessage = `同步完成 | ${localStats.bookmarkCount}书签/${localStats.folderCount}文件夹`;
 
-        // 保存完整的同步状态
+        // 保存完整的同步状态并通知
         const successState = {
           status: ProgressEventType.SUCCESS,
           message: statusMessage,

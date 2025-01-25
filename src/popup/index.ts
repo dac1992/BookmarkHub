@@ -349,7 +349,6 @@ export class PopupPage {
 
     try {
       this.syncInProgress = true;
-      this.updateSyncStatus('准备同步...', 0);
 
       // 验证配置
       const config = await this.configService.getConfig();
@@ -374,9 +373,6 @@ export class PopupPage {
       this.showError('同步失败: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       this.syncInProgress = false;
-      setTimeout(() => {
-        this.resetSyncProgress();
-      }, 3000);
     }
   }
 
