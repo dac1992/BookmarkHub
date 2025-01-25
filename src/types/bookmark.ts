@@ -83,6 +83,7 @@ export interface ProgressNotification {
   type: ProgressEventType;
   message: string;
   progress?: number;
+  error?: Error;
 }
 
 /**

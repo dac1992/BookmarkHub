@@ -96,11 +96,15 @@ export class SyncService {
       this.logger.error('同步失败:', error);
       this.notifyProgress({
         type: ProgressEventType.ERROR,
-        message: `同步失败: ${error.message}`
+        message: `同步失败: ${error.message}`,
+        error: error
       });
       throw error;
     } finally {
-      this.syncInProgress = false;
+      // 确保在任何情况下都重置同步状态
+      setTimeout(() => {
+        this.syncInProgress = false;
+      }, 1000); // 添加1秒延迟，防止状态切换太快
     }
   }
 

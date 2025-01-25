@@ -136,6 +136,11 @@ export class BookmarkService {
         return null;
       }
 
+      // 跳过空的默认文件夹（"书签栏"和"其他书签"）
+      if ((node.id === '1' || node.id === '2') && (!node.children || node.children.length === 0)) {
+        return null;
+      }
+
       const convertedNode: BookmarkNode = {
         id: node.id,
         parentId: node.parentId || '',
@@ -152,8 +157,8 @@ export class BookmarkService {
           .filter((n): n is BookmarkNode => n !== null);
       }
 
-      // 只有非根节点才添加到结果中
-      if (node.id !== '0') {
+      // 只有非根节点且不是空的默认文件夹才添加到结果中
+      if (node.id !== '0' && (node.url || (node.children && node.children.length > 0))) {
         allNodes.push(convertedNode);
       }
 
@@ -176,6 +181,18 @@ export class BookmarkService {
       // 获取根节点
       const [root] = await chrome.bookmarks.getTree();
       
+      // 创建书签映射以检查重复
+      const bookmarkMap = new Map<string, BookmarkNode>();
+      const buildMap = (nodes: BookmarkNode[]) => {
+        for (const node of nodes) {
+          bookmarkMap.set(node.id, node);
+          if (node.children) {
+            buildMap(node.children);
+          }
+        }
+      };
+      buildMap(bookmarks);
+
       // 删除所有现有书签
       for (const child of root.children || []) {
         if (child.id !== '0') {  // 保留根节点
@@ -188,32 +205,52 @@ export class BookmarkService {
         node: BookmarkNode,
         parentId: string
       ): Promise<void> => {
-        if (node.url) {
-          // 创建书签
-          await chrome.bookmarks.create({
-            parentId,
-            title: node.title,
-            url: node.url
-          });
-        } else {
-          // 创建文件夹
-          const folder = await chrome.bookmarks.create({
-            parentId,
-            title: node.title
-          });
-          
-          // 递归创建子节点
-          if (node.children) {
-            for (const child of node.children) {
-              await createBookmarkTree(child, folder.id);
+        try {
+          if (node.url) {
+            // 检查是否已存在相同URL的书签
+            const existingBookmarks = await chrome.bookmarks.search({ url: node.url });
+            if (existingBookmarks.length > 0) {
+              this.logger.info(`跳过重复书签: ${node.title} (${node.url})`);
+              return;
+            }
+
+            // 创建书签
+            await chrome.bookmarks.create({
+              parentId,
+              title: node.title,
+              url: node.url
+            });
+          } else {
+            // 创建文件夹
+            const folder = await chrome.bookmarks.create({
+              parentId,
+              title: node.title
+            });
+            
+            // 递归创建子节点
+            if (node.children) {
+              for (const child of node.children) {
+                await createBookmarkTree(child, folder.id);
+              }
             }
           }
+        } catch (error: any) {
+          this.logger.error(`创建书签失败: ${node.title}`, error);
+          throw error;
         }
       };
 
       // 开始创建新书签
+      let progress = 0;
+      const totalBookmarks = bookmarks.length;
       for (const bookmark of bookmarks) {
         await createBookmarkTree(bookmark, '0');
+        progress += (1 / totalBookmarks) * 100;
+        this.notifyProgress({
+          type: ProgressEventType.PROGRESS,
+          message: `正在更新书签... ${Math.round(progress)}%`,
+          progress: Math.round(progress)
+        });
       }
 
       this.notifyProgress({
@@ -223,7 +260,8 @@ export class BookmarkService {
     } catch (error: any) {
       this.notifyProgress({
         type: ProgressEventType.ERROR,
-        message: `更新本地书签失败: ${error.message}`
+        message: `更新本地书签失败: ${error.message}`,
+        error: error
       });
       throw error;
     }

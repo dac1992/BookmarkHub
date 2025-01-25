@@ -169,72 +169,93 @@ export class GitHubService {
     const content = JSON.stringify(syncData, null, 2);
     
     await RetryHelper.execute(async () => {
-      if (!config.gitConfig.gistId) {
-        this.notifyProgress({
-          type: ProgressEventType.PROGRESS,
-          message: '创建新的Gist...',
-          progress: 30
-        });
-        // 创建新的Gist
-        const response = await fetch(`${this.API_BASE}/gists`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `token ${this.token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            description: 'Browser Bookmarks Sync',
-            public: false,
-            files: {
-              [this.SYNC_FILE]: {
-                content
+      try {
+        if (!config.gitConfig.gistId) {
+          this.notifyProgress({
+            type: ProgressEventType.PROGRESS,
+            message: '创建新的Gist...',
+            progress: 30
+          });
+          // 创建新的Gist
+          const response = await fetch(`${this.API_BASE}/gists`, {
+            method: 'POST',
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              description: 'Browser Bookmarks Sync',
+              public: false,
+              files: {
+                [this.SYNC_FILE]: {
+                  content
+                }
               }
-            }
-          })
-        });
+            })
+          });
 
-        if (!response.ok) {
-          throw new Error('创建Gist失败');
-        }
-
-        const data = await response.json();
-        await this.configService.saveConfig({
-          gitConfig: {
-            ...config.gitConfig,
-            gistId: data.id
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(`创建Gist失败: ${response.status} ${errorData.message || response.statusText}`);
           }
-        });
-      } else {
-        this.notifyProgress({
-          type: ProgressEventType.PROGRESS,
-          message: '更新已有Gist...',
-          progress: 50
-        });
-        // 更新已有的Gist
-        const response = await fetch(`${this.API_BASE}/gists/${config.gitConfig.gistId}`, {
-          method: 'PATCH',
-          headers: {
-            'Authorization': `token ${this.token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            files: {
-              [this.SYNC_FILE]: {
-                content
-              }
-            }
-          })
-        });
 
-        if (!response.ok) {
-          throw new Error('更新Gist失败');
+          const data = await response.json();
+          await this.configService.saveConfig({
+            gitConfig: {
+              ...config.gitConfig,
+              gistId: data.id
+            }
+          });
+        } else {
+          this.notifyProgress({
+            type: ProgressEventType.PROGRESS,
+            message: '更新已有Gist...',
+            progress: 50
+          });
+          // 更新已有的Gist
+          const response = await fetch(`${this.API_BASE}/gists/${config.gitConfig.gistId}`, {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              files: {
+                [this.SYNC_FILE]: {
+                  content
+                }
+              }
+            })
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            if (response.status === 404) {
+              // Gist不存在，清除gistId并重试
+              await this.configService.saveConfig({
+                gitConfig: {
+                  ...config.gitConfig,
+                  gistId: undefined
+                }
+              });
+              throw new Error('Gist不存在，将重新创建');
+            }
+            throw new Error(`更新Gist失败: ${response.status} ${errorData.message || response.statusText}`);
+          }
         }
+      } catch (error: any) {
+        // 处理API限制错误
+        if (error.message?.includes('API rate limit exceeded')) {
+          const resetTime = new Date(parseInt(error.response?.headers?.get('x-ratelimit-reset') || '0') * 1000);
+          throw new Error(`GitHub API限制已达上限，请等待至 ${resetTime.toLocaleString()} 后重试`);
+        }
+        throw error;
       }
     }, {
       maxAttempts: 3,
-      delayMs: 1000,
+      delayMs: 2000, // 增加延迟时间
       backoffFactor: 2,
       retryableErrors: [
         'rate limit exceeded',
@@ -242,7 +263,8 @@ export class GitHubService {
         'timeout',
         'ETIMEDOUT',
         'ECONNRESET',
-        'ECONNREFUSED'
+        'ECONNREFUSED',
+        'Gist不存在，将重新创建'
       ]
     });
   }
@@ -804,7 +826,8 @@ export class GitHubService {
     let count = 0;
     const countNodes = (nodes: BookmarkNode[]) => {
       for (const node of nodes) {
-        if (!node.url) {
+        // 排除默认的根文件夹（"书签栏"和"其他书签"）
+        if (!node.url && node.id !== "1" && node.id !== "2") {
           count++;
         }
         if (node.children) {
