@@ -155,6 +155,11 @@ export class GitHubService {
         message: '书签上传完成'
       });
     } catch (error: any) {
+      // 如果是重试错误，不显示错误提示
+      if (error.message === 'RETRY_UPLOAD') {
+        this.logger.debug('文件已存在，重新尝试上传');
+        return;
+      }
       this.notifyProgress({
         type: ProgressEventType.ERROR,
         message: `上传书签失败: ${error.message}`
@@ -337,67 +342,77 @@ export class GitHubService {
     }
     
     const content = JSON.stringify(syncData, null, 2);
+    let retryCount = 0;
+    const maxRetries = 3;
     
-    return await RetryHelper.execute(async () => {
-      this.notifyProgress({
-        type: ProgressEventType.PROGRESS,
-        message: '检查仓库状态...',
-        progress: 30
-      });
+    while (retryCount < maxRetries) {
+      try {
+        this.notifyProgress({
+          type: ProgressEventType.PROGRESS,
+          message: '检查仓库状态...',
+          progress: 30
+        });
 
-      // 确保仓库配置完整
-      if (!config.gitConfig.owner || !config.gitConfig.repo) {
-        throw new Error('仓库配置不完整');
-      }
-
-      // 确保仓库和分支存在
-      const branch = config.gitConfig.branch || this.DEFAULT_BRANCH;
-      await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
-      await this.ensureBranch(config.gitConfig.owner, config.gitConfig.repo, branch);
-
-      // 生成新的文件名，使用时间戳
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const fileName = `${this.SYNC_FILE_PREFIX}_${timestamp}.json`;
-
-      // 创建新文件
-      const uploadContent = btoa(unescape(encodeURIComponent(content)));
-      const uploadResponse = await fetch(
-        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${fileName}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Authorization': `token ${this.token}`,
-            'Accept': 'application/vnd.github.v3+json',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: `更新书签同步数据 [${timestamp}]`,
-            content: uploadContent,
-            branch
-          })
+        // 确保仓库配置完整
+        if (!config.gitConfig.owner || !config.gitConfig.repo) {
+          throw new Error('仓库配置不完整');
         }
-      );
 
-      if (!uploadResponse.ok) {
-        const errorData = await uploadResponse.json();
-        throw new Error(`上传到仓库失败: ${errorData.message}`);
+        // 确保仓库和分支存在
+        const branch = config.gitConfig.branch || this.DEFAULT_BRANCH;
+        await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
+        await this.ensureBranch(config.gitConfig.owner, config.gitConfig.repo, branch);
+
+        // 生成新的文件名，使用时间戳
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `${this.SYNC_FILE_PREFIX}_${timestamp}.json`;
+
+        // 创建新文件
+        const uploadContent = btoa(unescape(encodeURIComponent(content)));
+        const uploadResponse = await fetch(
+          `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${fileName}`,
+          {
+            method: 'PUT',
+            headers: {
+              'Authorization': `token ${this.token}`,
+              'Accept': 'application/vnd.github.v3+json',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              message: `更新书签同步数据 [${timestamp}]`,
+              content: uploadContent,
+              branch
+            })
+          }
+        );
+
+        if (!uploadResponse.ok) {
+          const errorData = await uploadResponse.json();
+          if (uploadResponse.status === 422 && errorData.message?.includes('sha')) {
+            retryCount++;
+            this.logger.debug(`文件已存在，重新尝试上传 (${retryCount}/${maxRetries})`);
+            // 等待一秒后重试
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+          throw new Error(`上传到仓库失败: ${errorData.message}`);
+        }
+
+        // 上传成功后，清理旧文件
+        await this.cleanupOldFiles(config.gitConfig.owner, config.gitConfig.repo, branch);
+        return;
+      } catch (error: any) {
+        if (error.message?.includes('API rate limit exceeded')) {
+          throw error; // API 限制错误直接抛出
+        }
+        if (retryCount >= maxRetries - 1) {
+          throw error; // 重试次数用完，抛出最后一次的错误
+        }
+        retryCount++;
+        this.logger.debug(`上传失败，重新尝试 (${retryCount}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
-
-      // 上传成功后，清理旧文件
-      await this.cleanupOldFiles(config.gitConfig.owner, config.gitConfig.repo, branch);
-    }, {
-      maxAttempts: 2,  // 减少重试次数，因为现在不太可能发生冲突
-      delayMs: 1000,
-      backoffFactor: 2,
-      retryableErrors: [
-        'rate limit exceeded',
-        'network error',
-        'timeout',
-        'ETIMEDOUT',
-        'ECONNRESET',
-        'ECONNREFUSED'
-      ]
-    });
+    }
   }
 
   private async cleanupOldFiles(owner: string, repo: string, branch: string): Promise<void> {
