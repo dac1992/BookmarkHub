@@ -144,4 +144,22 @@ export interface SyncConfig {
 /**
  * 书签操作记录
  */
-export type BookmarkOperation = BookmarkChange; 
+export type BookmarkOperation = BookmarkChange;
+
+/**
+ * 同步状态接口
+ */
+export interface SyncState {
+  status: ProgressEventType;
+  message: string;
+  progress: number;
+  lastSyncTime: number;
+  localStats?: {
+    bookmarkCount: number;
+    folderCount: number;
+  };
+  remoteStats?: {
+    bookmarkCount: number;
+    folderCount: number;
+  };
+} 

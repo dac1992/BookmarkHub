@@ -38,7 +38,7 @@ export class GitHubService {
   private progressListeners: ((notification: ProgressNotification) => void)[] = [];
   private readonly API_BASE = 'https://api.github.com';
   private readonly DEFAULT_BRANCH = 'main';
-  private readonly SYNC_FILE = 'bookmarks.json';
+  private readonly SYNC_FILE_PREFIX = 'bookmarks';
   private readonly SYNC_VERSION = '1.0.0';
 
   private constructor() {
@@ -188,7 +188,7 @@ export class GitHubService {
               description: 'Browser Bookmarks Sync',
               public: false,
               files: {
-                [this.SYNC_FILE]: {
+                [this.SYNC_FILE_PREFIX]: {
                   content
                 }
               }
@@ -223,7 +223,7 @@ export class GitHubService {
             },
             body: JSON.stringify({
               files: {
-                [this.SYNC_FILE]: {
+                [this.SYNC_FILE_PREFIX]: {
                   content
                 }
               }
@@ -296,81 +296,14 @@ export class GitHubService {
       await this.ensureRepository(config.gitConfig.owner, config.gitConfig.repo);
       await this.ensureBranch(config.gitConfig.owner, config.gitConfig.repo, branch);
 
-      this.notifyProgress({
-        type: ProgressEventType.PROGRESS,
-        message: '检查远程文件...',
-        progress: 50
-      });
+      // 生成新的文件名，使用时间戳
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const fileName = `${this.SYNC_FILE_PREFIX}_${timestamp}.json`;
 
-      // 获取当前文件（如果存在）
-      let currentData: BookmarkSyncData | null = null;
-      let sha: string | undefined;
-      
-      try {
-        const response = await fetch(
-          `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}?ref=${branch}`,
-          {
-            headers: {
-              'Authorization': `token ${this.token}`,
-              'Accept': 'application/vnd.github.v3+json'
-            }
-          }
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          sha = data.sha;
-          // 正确解码远程文件内容
-          const fileContent = decodeURIComponent(atob(data.content));
-          try {
-            currentData = JSON.parse(fileContent);
-            // 验证远程数据格式
-            if (!this.validateSyncData(currentData)) {
-              this.logger.warn('远程数据格式无效，将使用本地数据');
-              currentData = null;
-            }
-          } catch (e) {
-            this.logger.error('解析远程数据失败:', e);
-            currentData = null;
-          }
-        }
-      } catch (error) {
-        const gitError = error as GitHubError;
-        this.logger.warn('获取远程文件失败，将创建新文件:', gitError.message);
-      }
-
-      // 如果文件存在且有效，检查冲突
-      if (currentData) {
-        if (currentData.lastModified >= syncData.lastModified) {
-          // 远程版本更新或相同，需要合并
-          this.notifyProgress({
-            type: ProgressEventType.PROGRESS,
-            message: '检测到远程更新，正在合并...',
-            progress: 60
-          });
-          
-          try {
-            syncData = await this.mergeBookmarks(currentData, syncData);
-          } catch (error: unknown) {
-            if (error instanceof Error) {
-              throw new Error(`合并书签失败: ${error.message}`);
-            } else {
-              throw new Error(`合并书签失败: ${String(error)}`);
-            }
-          }
-        }
-      }
-
-      this.notifyProgress({
-        type: ProgressEventType.PROGRESS,
-        message: '上传文件到仓库...',
-        progress: 80
-      });
-
-      // 创建或更新文件
-      const uploadContent = btoa(unescape(encodeURIComponent(JSON.stringify(syncData, null, 2))));
+      // 创建新文件
+      const uploadContent = btoa(unescape(encodeURIComponent(content)));
       const uploadResponse = await fetch(
-        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}`,
+        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${fileName}`,
         {
           method: 'PUT',
           headers: {
@@ -379,31 +312,22 @@ export class GitHubService {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            message: `更新书签同步数据 [${new Date().toISOString()}]`,
+            message: `更新书签同步数据 [${timestamp}]`,
             content: uploadContent,
-            branch,
-            ...(sha ? { sha } : {})
+            branch
           })
         }
       );
 
       if (!uploadResponse.ok) {
         const errorData = await uploadResponse.json();
-        if (uploadResponse.status === 422 && errorData.message?.includes('sha')) {
-          // SHA不匹配，说明文件已被修改，重试整个过程
-          this.logger.warn('文件已被修改，重新尝试上传');
-          throw new Error('RETRY_UPLOAD');
-        }
         throw new Error(`上传到仓库失败: ${errorData.message}`);
       }
 
-      this.notifyProgress({
-        type: ProgressEventType.PROGRESS,
-        message: '更新完成',
-        progress: 100
-      });
+      // 上传成功后，清理旧文件
+      await this.cleanupOldFiles(config.gitConfig.owner, config.gitConfig.repo, branch);
     }, {
-      maxAttempts: 3,
+      maxAttempts: 2,  // 减少重试次数，因为现在不太可能发生冲突
       delayMs: 1000,
       backoffFactor: 2,
       retryableErrors: [
@@ -412,10 +336,62 @@ export class GitHubService {
         'timeout',
         'ETIMEDOUT',
         'ECONNRESET',
-        'ECONNREFUSED',
-        'RETRY_UPLOAD'  // 添加新的重试错误类型
+        'ECONNREFUSED'
       ]
     });
+  }
+
+  private async cleanupOldFiles(owner: string, repo: string, branch: string): Promise<void> {
+    try {
+      // 获取仓库中的所有文件
+      const response = await fetch(
+        `${this.API_BASE}/repos/${owner}/${repo}/contents?ref=${branch}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!response.ok) {
+        this.logger.warn('获取仓库文件列表失败，跳过清理');
+        return;
+      }
+
+      const files = await response.json();
+      const bookmarkFiles = files
+        .filter((file: any) => file.name.startsWith(this.SYNC_FILE_PREFIX))
+        .sort((a: any, b: any) => b.name.localeCompare(a.name));  // 按文件名降序排序
+
+      // 保留最新的5个文件，删除其他的
+      const filesToDelete = bookmarkFiles.slice(5);
+      
+      for (const file of filesToDelete) {
+        try {
+          await fetch(
+            `${this.API_BASE}/repos/${owner}/${repo}/contents/${file.path}`,
+            {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `token ${this.token}`,
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                message: `清理旧的书签同步文件 [${file.name}]`,
+                sha: file.sha,
+                branch
+              })
+            }
+          );
+        } catch (error) {
+          this.logger.warn(`清理旧文件 ${file.name} 失败:`, error);
+        }
+      }
+    } catch (error) {
+      this.logger.warn('清理旧文件失败:', error);
+    }
   }
 
   private validateSyncData(data: any): data is BookmarkSyncData {
@@ -749,7 +725,7 @@ export class GitHubService {
       }
 
       const data = await response.json();
-      const content = data.files[this.SYNC_FILE].content;
+      const content = data.files[this.SYNC_FILE_PREFIX].content;
       return JSON.parse(content);
     }, {
       maxAttempts: 3,
@@ -780,8 +756,9 @@ export class GitHubService {
         progress: 50
       });
       
+      // 获取仓库中的所有文件
       const response = await fetch(
-        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${this.SYNC_FILE}?ref=${branch}`,
+        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents?ref=${branch}`,
         {
           headers: {
             'Authorization': `token ${this.token}`,
@@ -791,10 +768,35 @@ export class GitHubService {
       );
 
       if (!response.ok) {
-        throw new Error('从仓库下载失败');
+        throw new Error('获取仓库文件列表失败');
       }
 
-      const data = await response.json();
+      const files = await response.json();
+      const bookmarkFiles = files
+        .filter((file: any) => file.name.startsWith(this.SYNC_FILE_PREFIX))
+        .sort((a: any, b: any) => b.name.localeCompare(a.name));  // 按文件名降序排序
+
+      if (bookmarkFiles.length === 0) {
+        throw new Error('未找到书签同步文件');
+      }
+
+      // 获取最新的文件内容
+      const latestFile = bookmarkFiles[0];
+      const fileResponse = await fetch(
+        `${this.API_BASE}/repos/${config.gitConfig.owner}/${config.gitConfig.repo}/contents/${latestFile.path}?ref=${branch}`,
+        {
+          headers: {
+            'Authorization': `token ${this.token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        }
+      );
+
+      if (!fileResponse.ok) {
+        throw new Error('下载书签文件失败');
+      }
+
+      const data = await fileResponse.json();
       const content = decodeURIComponent(atob(data.content));
       return JSON.parse(content);
     }, {
